@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BHBY — Ad Analytics Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --gold: #c89a10;
+    --green: #16a34a;
+    --red: #dc2626;
+    --orange: #ea580c;
+    --blue: #2563eb;
+    --purple: #7c3aed;
+    --teal: #0d9488;
+    --bg: #f5f6fa;
+    --surface: #ffffff;
+    --border: #dde1ed;
+    --text: #1a1d2e;
+    --muted: #6b7280;
+  }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .font-display { font-family: 'Playfair Display', serif; }
+  .font-mono { font-family: 'DM Mono', monospace; }
+
+  /* KPI Cards */
+  .kpi-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+    transition: box-shadow 0.2s;
+  }
+  .kpi-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.09); }
+  .kpi-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .kpi-val {
+    font-family: 'Playfair Display', serif;
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+  .kpi-sub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+  .kpi-icon {
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    margin-bottom: 10px;
+  }
+
+  /* Chart cards */
+  .chart-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  }
+  .chart-title {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+
+  /* Loading skeleton */
+  .skeleton {
+    background: linear-gradient(90deg, #e8eaf0 25%, #f0f2f8 50%, #e8eaf0 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 6px;
+  }
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* Error state */
+  .error-card {
+    background: rgba(220,38,38,0.04);
+    border: 1px solid rgba(220,38,38,0.25);
+    border-radius: 10px;
+    padding: 20px;
+    text-align: center;
+  }
+
+  /* Badges */
+  .badge {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: 'DM Mono', monospace;
+    font-weight: 500;
+  }
+  .badge-red { background: rgba(220,38,38,0.1); color: var(--red); }
+  .badge-orange { background: rgba(234,88,12,0.1); color: var(--orange); }
+  .badge-green { background: rgba(22,163,74,0.12); color: var(--green); }
+  .badge-gold { background: rgba(200,154,16,0.12); color: var(--gold); }
+  .badge-blue { background: rgba(37,99,235,0.1); color: var(--blue); }
+
+  /* Table */
+  .data-table { width: 100%; border-collapse: collapse; }
+  .data-table th {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    background: #f5f6fa;
+    white-space: nowrap;
+  }
+  .data-table td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .data-table tr:last-child td { border-bottom: none; }
+  .data-table tr:hover td { background: #f9fafc; }
+
+  /* Refresh button */
+  .refresh-btn {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--teal);
+    border: 1px solid rgba(13,148,136,0.4);
+    background: transparent;
+    padding: 5px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .refresh-btn:hover { background: var(--teal); color: #fff; }
+  .refresh-btn:disabled { opacity: 0.5; cursor: default; }
+
+  /* Scrollable table wrapper */
+  .table-scroll { overflow-x: auto; }
+
+  /* Live indicator */
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  .live-dot {
+    display: inline-block;
+    width: 7px; height: 7px;
+    background: var(--green);
+    border-radius: 50%;
+    margin-right: 5px;
+    animation: pulse-dot 2s infinite;
+  }
+
+  /* ── Login Gate ─────────────────────────────────────────────────────── */
+  #loginGate {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: linear-gradient(135deg, #1a1d2e 0%, #0f1119 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #loginGate.hidden { display: none; }
+  .login-box {
+    background: #ffffff;
+    border-radius: 14px;
+    padding: 40px 44px;
+    width: 100%;
+    max-width: 380px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+    text-align: center;
+  }
+  .login-box h1 {
+    font-family: 'Playfair Display', serif;
+    font-size: 28px;
+    font-weight: 900;
+    color: var(--gold);
+    margin-bottom: 4px;
+  }
+  .login-box p {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 28px;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 0.05em;
+  }
+  .login-input {
+    width: 100%;
+    padding: 11px 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 15px;
+    font-family: 'DM Sans', sans-serif;
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color 0.15s;
+    margin-bottom: 12px;
+  }
+  .login-input:focus { border-color: var(--teal); }
+  .login-btn {
+    width: 100%;
+    padding: 11px;
+    background: var(--teal);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .login-btn:hover { background: #0f766e; }
+  .login-btn:disabled { opacity: 0.6; cursor: default; }
+  .login-error {
+    color: var(--red);
+    font-size: 12px;
+    margin-top: 10px;
+    min-height: 16px;
+    font-family: 'DM Mono', monospace;
+  }
+
+  /* Responsive adjustments */
+  @media (max-width: 768px) {
+    .kpi-val { font-size: 22px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Login Gate ──────────────────────────────────────────────────────────── -->
+<div id="loginGate">
+  <div class="login-box">
+    <h1>BHBY</h1>
+    <p>Analytics Dashboard — behappybeyou.net</p>
+    <input
+      class="login-input"
+      id="loginPassword"
+      type="password"
+      placeholder="Enter password"
+      autocomplete="current-password"
+      onkeydown="if(event.key==='Enter')submitLogin()"
+    />
+    <button class="login-btn" id="loginBtn" onclick="submitLogin()">Unlock Dashboard</button>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
+
+<!-- Header -->
+<div style="background:var(--surface);border-bottom:1px solid var(--border);padding:16px 32px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
+  <div>
+    <h1 class="font-display" style="font-size:24px;color:var(--gold);font-weight:900;line-height:1;">BHBY Analytics</h1>
+    <div class="font-mono" style="font-size:11px;color:var(--muted);margin-top:3px;">Paid Ads Dashboard — Last 30 Days</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+    <span id="lastRefreshed" class="font-mono" style="font-size:11px;color:var(--muted);">—</span>
+    <span id="nextRefresh" class="font-mono" style="font-size:11px;color:var(--muted);" title="Auto-refresh every 5 min">—</span>
+    <button class="refresh-btn" id="globalRefresh" onclick="loadAll()">&#8635; Refresh All</button>
+  </div>
+</div>
+
+<!-- Main content -->
+<div style="padding:28px 32px;max-width:1600px;margin:0 auto;">
+
+  <!-- Section header -->
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;">
+    <span class="live-dot"></span>
+    <span class="font-mono" style="font-size:11px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;">Live Data — behappybeyou.net</span>
+  </div>
+
+  <!-- ROW 1: KPI Cards — Revenue, AOV, Shipping, Orders -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px;" class="kpi-row-1">
+    <div class="kpi-card" id="kpi-revenue">
+      <div class="kpi-icon" style="background:rgba(200,154,16,0.1);">💰</div>
+      <div class="kpi-label">Total Revenue</div>
+      <div class="kpi-val gold" id="val-revenue"><span class="skeleton" style="width:90px;height:32px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-revenue">Last 30 days</div>
+    </div>
+    <div class="kpi-card" id="kpi-aov">
+      <div class="kpi-icon" style="background:rgba(37,99,235,0.1);">📦</div>
+      <div class="kpi-label">Avg Order Value</div>
+      <div class="kpi-val blue" id="val-aov"><span class="skeleton" style="width:80px;height:32px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-aov">Per paid order</div>
+    </div>
+    <div class="kpi-card" id="kpi-shipping">
+      <div class="kpi-icon" style="background:rgba(13,148,136,0.1);">🚚</div>
+      <div class="kpi-label">Total Shipping</div>
+      <div class="kpi-val teal" id="val-shipping"><span class="skeleton" style="width:80px;height:32px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-shipping">Collected from customers</div>
+    </div>
+    <div class="kpi-card" id="kpi-orders">
+      <div class="kpi-icon" style="background:rgba(124,58,237,0.1);">🛒</div>
+      <div class="kpi-label">Total Orders</div>
+      <div class="kpi-val purple" id="val-orders"><span class="skeleton" style="width:60px;height:32px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-orders">Paid & processed</div>
+      <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);display:flex;align-items:center;gap:6px;">
+        <span style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:0.08em;">Units sold</span>
+        <span class="font-mono" style="font-size:13px;font-weight:500;color:var(--text);" id="val-units-sold">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ROW 2: KPI Cards — New customers, Returning, Abandonment rate, Abandoned value -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;" class="kpi-row-2">
+    <div class="kpi-card">
+      <div class="kpi-icon" style="background:rgba(22,163,74,0.1);">👤</div>
+      <div class="kpi-label">New Customers</div>
+      <div class="kpi-val green" id="val-new"><span class="skeleton" style="width:60px;height:32px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-new">First-time buyers</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-icon" style="background:rgba(124,58,237,0.1);">🔁</div>
+      <div class="kpi-label">Returning Customers</div>
+      <div class="kpi-val purple" id="val-returning"><span class="skeleton" style="width:60px;height:32px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-returning">Repeat buyers</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-icon" style="background:rgba(220,38,38,0.1);">⚠️</div>
+      <div class="kpi-label">Abandonment Rate</div>
+      <div class="kpi-val red" id="val-abandonment"><span class="skeleton" style="width:70px;height:32px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-abandonment">Checkout abandoned</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-icon" style="background:rgba(234,88,12,0.1);">💸</div>
+      <div class="kpi-label">Abandoned Value</div>
+      <div class="kpi-val orange" id="val-abandoned-value"><span class="skeleton" style="width:80px;height:32px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-abandoned-value">Revenue at risk</div>
+    </div>
+  </div>
+
+  <!-- ROW 3: Google Ads KPIs — Total Spend, CPC, ACOS, TACOS -->
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;margin-top:4px;">
+    <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#4285f4;"></span>
+    <span class="font-mono" style="font-size:11px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;">Google Ads Performance</span>
+    <span id="ads-loading" class="font-mono" style="font-size:10px;color:var(--muted);">Loading…</span>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;" class="kpi-row-ads" id="adsKpiRow">
+    <div class="kpi-card" id="kpi-adspend">
+      <div class="kpi-icon" style="background:rgba(37,99,235,0.1);">📢</div>
+      <div class="kpi-label">Total Ad Spend</div>
+      <div class="kpi-val blue" id="val-adspend"><span class="skeleton" style="width:80px;height:32px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-adspend">Google Ads — last 30d</div>
+    </div>
+    <div class="kpi-card" id="kpi-cpc">
+      <div class="kpi-icon" style="background:rgba(13,148,136,0.1);">🖱️</div>
+      <div class="kpi-label">CPC</div>
+      <div class="kpi-val teal" id="val-cpc"><span class="skeleton" style="width:60px;height:32px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-cpc">Cost per click</div>
+    </div>
+    <div class="kpi-card" id="kpi-acos">
+      <div class="kpi-icon" style="background:rgba(124,58,237,0.1);">🎯</div>
+      <div class="kpi-label">ACOS</div>
+      <div class="kpi-val purple" id="val-acos"><span class="skeleton" style="width:60px;height:32px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-acos">Ad spend / ad revenue</div>
+    </div>
+    <div class="kpi-card" id="kpi-tacos">
+      <div class="kpi-icon" style="background:rgba(234,88,12,0.1);">📊</div>
+      <div class="kpi-label">TACOS</div>
+      <div class="kpi-val orange" id="val-tacos"><span class="skeleton" style="width:60px;height:32px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-tacos">Ad spend / total revenue</div>
+    </div>
+  </div>
+
+  <!-- ROW 4: Sales by SKU (bar) + AOV trend (line) -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+    <div class="chart-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <div class="chart-title" style="margin-bottom:0;">Sales by SKU — Top 15 by Revenue</div>
+        <span id="sku-loading" class="font-mono" style="font-size:10px;color:var(--muted);">Loading…</span>
+      </div>
+      <div id="sku-error" style="display:none;"></div>
+      <div style="position:relative;height:360px;">
+        <canvas id="chartSku"></canvas>
+      </div>
+    </div>
+    <div class="chart-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <div class="chart-title" style="margin-bottom:0;">AOV Over Time — Daily (30d)</div>
+        <span id="aov-loading" class="font-mono" style="font-size:10px;color:var(--muted);">Loading…</span>
+      </div>
+      <div id="aov-error" style="display:none;"></div>
+      <div style="position:relative;height:360px;">
+        <canvas id="chartAov"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- ROW 5: UTM Breakdown + Inventory Warnings -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+    <div class="chart-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <div class="chart-title" style="margin-bottom:0;">Orders by UTM Source / Channel</div>
+        <span id="utm-loading" class="font-mono" style="font-size:10px;color:var(--muted);">Loading…</span>
+      </div>
+      <div id="utm-error" style="display:none;"></div>
+      <div style="display:grid;grid-template-columns:180px 1fr;gap:16px;align-items:center;">
+        <div style="position:relative;height:180px;width:180px;">
+          <canvas id="chartUtm"></canvas>
+        </div>
+        <div id="utmLegend" style="font-size:12px;"></div>
+      </div>
+      <!-- UTM table -->
+      <div class="table-scroll" style="margin-top:16px;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Source / Medium</th>
+              <th>Orders</th>
+              <th>Revenue</th>
+              <th>% of Orders</th>
+            </tr>
+          </thead>
+          <tbody id="utmTableBody">
+            <tr><td colspan="4" style="padding:16px;text-align:center;color:var(--muted);">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <div class="chart-title" style="margin-bottom:0;">Low Inventory Warnings (&lt; 50 units)</div>
+        <span id="inv-loading" class="font-mono" style="font-size:10px;color:var(--muted);">Loading…</span>
+      </div>
+      <div id="inv-error" style="display:none;"></div>
+      <!-- Summary badges -->
+      <div id="invSummary" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;"></div>
+      <div class="table-scroll" style="max-height:420px;overflow-y:auto;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Product / Variant</th>
+              <th>SKU</th>
+              <th>Qty</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="inventoryTableBody">
+            <tr><td colspan="4" style="padding:16px;text-align:center;color:var(--muted);">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ROW 6: Abandoned Checkout Table -->
+  <div class="chart-card" style="margin-bottom:16px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <div class="chart-title" style="margin-bottom:0;">Recent Abandoned Checkouts — Last 30 Days</div>
+      <span id="abandoned-loading" class="font-mono" style="font-size:10px;color:var(--muted);">Loading…</span>
+    </div>
+    <div id="abandoned-error" style="display:none;"></div>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>First Item</th>
+            <th>Items</th>
+            <th>Value</th>
+            <th>Customer</th>
+            <th>Recovery Link</th>
+          </tr>
+        </thead>
+        <tbody id="abandonedTableBody">
+          <tr><td colspan="6" style="padding:16px;text-align:center;color:var(--muted);">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ─── Chart.js defaults ──────────────────────────────────────────────────────
+Chart.defaults.font.family = "'DM Sans', sans-serif";
+Chart.defaults.font.size = 12;
+Chart.defaults.color = "#6b7280";
+
+const PALETTE = [
+  "#c89a10","#2563eb","#0d9488","#7c3aed","#dc2626",
+  "#ea580c","#16a34a","#db2777","#0891b2","#65a30d",
+  "#6366f1","#f59e0b","#14b8a6","#8b5cf6","#ef4444",
+];
+
+// ─── Base URL (must be defined first, used by auth and fetch) ─────────────────
+const BASE = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+  ? "http://localhost:8888"
+  : "";
+
+// ─── Auth & session ───────────────────────────────────────────────────────────
+const SESSION_KEY = "bhby_dash_token";
+
+function getToken() {
+  return sessionStorage.getItem(SESSION_KEY) || "";
+}
+
+function saveToken(token) {
+  sessionStorage.setItem(SESSION_KEY, token);
+}
+
+function clearToken() {
+  sessionStorage.removeItem(SESSION_KEY);
+}
+
+// ─── Login Gate ───────────────────────────────────────────────────────────────
+async function submitLogin() {
+  const input = document.getElementById("loginPassword");
+  const btn = document.getElementById("loginBtn");
+  const errEl = document.getElementById("loginError");
+  const password = input.value.trim();
+
+  if (!password) {
+    errEl.textContent = "Please enter the password.";
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "Checking…";
+  errEl.textContent = "";
+
+  try {
+    const res = await fetch(`${BASE}/.netlify/functions/auth`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    const data = await res.json();
+
+    if (!res.ok || data.error) {
+      throw new Error(data.error || "Invalid password");
+    }
+
+    saveToken(data.token);
+    document.getElementById("loginGate").classList.add("hidden");
+    loadAll();
+  } catch (err) {
+    errEl.textContent = err.message === "Invalid password" ? "Incorrect password. Try again." : `Error: ${err.message}`;
+    btn.disabled = false;
+    btn.textContent = "Unlock Dashboard";
+    input.focus();
+  }
+}
+
+// ─── Check for existing session on load ──────────────────────────────────────
+(function checkSession() {
+  const token = getToken();
+  if (token) {
+    document.getElementById("loginGate").classList.add("hidden");
+    // loadAll() will be called at boot
+  }
+  // If no token, the gate stays visible and loadAll is NOT called yet
+})();
+
+// ─── Utility helpers ─────────────────────────────────────────────────────────
+function fmt$(v) {
+  if (v == null) return "—";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(v);
+}
+function fmt$cents(v) {
+  if (v == null) return "—";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(v);
+}
+function fmtN(v) {
+  if (v == null) return "—";
+  return new Intl.NumberFormat("en-US").format(v);
+}
+function fmtPct(v) {
+  if (v == null) return "—";
+  return v.toFixed(1) + "%";
+}
+function fmtDate(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+// ─── Chart instances (so we can destroy & rebuild on refresh) ────────────────
+let charts = {};
+
+function destroyChart(id) {
+  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+}
+
+// ─── Loading / Error state helpers ──────────────────────────────────────────
+function setKpi(id, value, sub) {
+  const el = document.getElementById("val-" + id);
+  if (el) el.innerHTML = value;
+  const subEl = document.getElementById("sub-" + id);
+  if (sub != null && subEl) subEl.textContent = sub;
+}
+
+function showError(sectionId, message) {
+  const el = document.getElementById(sectionId + "-error");
+  const loadEl = document.getElementById(sectionId + "-loading");
+  if (el) {
+    el.style.display = "block";
+    el.innerHTML = `<div class="error-card"><span style="color:var(--red);font-size:13px;">⚠ ${escHtml(message)}</span></div>`;
+  }
+  if (loadEl) loadEl.textContent = "Error";
+}
+
+function clearError(sectionId) {
+  const el = document.getElementById(sectionId + "-error");
+  if (el) el.style.display = "none";
+}
+
+function setLoadingDone(sectionId) {
+  const el = document.getElementById(sectionId + "-loading");
+  if (el) el.textContent = "";
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+// ─── Fetch helpers ───────────────────────────────────────────────────────────
+async function fetchData(endpoint) {
+  const token = getToken();
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`${BASE}/.netlify/functions/${endpoint}`, { headers });
+  const json = await res.json();
+
+  if (res.status === 401) {
+    // Token expired or invalid — clear session and show login
+    clearToken();
+    document.getElementById("loginGate").classList.remove("hidden");
+    throw new Error("Session expired. Please log in again.");
+  }
+
+  if (!res.ok || json.error) {
+    throw new Error(json.error || `HTTP ${res.status}`);
+  }
+  return json;
+}
+
+// ─── Render: Orders KPIs + SKU chart + AOV chart + UTM ───────────────────────
+async function loadOrders() {
+  clearError("sku");
+  clearError("aov");
+  clearError("utm");
+
+  try {
+    const d = await fetchData("shopify-orders");
+
+    // KPI row 1
+    setKpi("revenue", fmt$(d.totalRevenue));
+    _totalRevenue = d.totalRevenue;
+    computeTacos();
+    setKpi("aov", fmt$cents(d.aovOverall));
+    setKpi("shipping", fmt$(d.totalShipping));
+    setKpi("orders", fmtN(d.totalOrders), `${d.windowDays}-day window`);
+    const unitsSoldEl = document.getElementById("val-units-sold");
+    if (unitsSoldEl) unitsSoldEl.textContent = d.totalUnitsSold != null ? fmtN(d.totalUnitsSold) : "—";
+
+    // KPI row 2 — new vs returning
+    const total = d.newVsReturning.new + d.newVsReturning.returning;
+    const newPct = total > 0 ? Math.round(d.newVsReturning.new / total * 100) : 0;
+    const retPct = total > 0 ? Math.round(d.newVsReturning.returning / total * 100) : 0;
+    setKpi("new", fmtN(d.newVsReturning.new), `${newPct}% of all orders`);
+    setKpi("returning", fmtN(d.newVsReturning.returning), `${retPct}% of all orders`);
+
+    // ── SKU bar chart ──
+    setLoadingDone("sku");
+    const topSkus = (d.salesBySku || []).slice(0, 15);
+    destroyChart("sku");
+    const skuCtx = document.getElementById("chartSku").getContext("2d");
+    charts["sku"] = new Chart(skuCtx, {
+      type: "bar",
+      data: {
+        labels: topSkus.map(s => {
+          const label = s.variant && s.variant !== "Default Title" ? `${s.title} · ${s.variant}` : s.title;
+          return label.length > 28 ? label.slice(0, 26) + "…" : label;
+        }),
+        datasets: [{
+          label: "Revenue ($)",
+          data: topSkus.map(s => s.totalRevenue),
+          backgroundColor: PALETTE.slice(0, topSkus.length),
+          borderRadius: 4,
+          borderSkipped: false,
+        }]
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => ` ${fmt$cents(ctx.raw)} — ${fmtN(topSkus[ctx.dataIndex].unitsSold)} units`,
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { color: "rgba(0,0,0,0.05)" },
+            ticks: { callback: (v) => "$" + (v >= 1000 ? (v/1000).toFixed(1)+"k" : v) }
+          },
+          y: { grid: { display: false }, ticks: { font: { size: 11 } } }
+        }
+      }
+    });
+
+    // ── AOV line chart ──
+    setLoadingDone("aov");
+    const ts = (d.aovTimeSeries || []);
+    destroyChart("aov");
+    const aovCtx = document.getElementById("chartAov").getContext("2d");
+    charts["aov"] = new Chart(aovCtx, {
+      type: "line",
+      data: {
+        labels: ts.map(t => fmtDate(t.date)),
+        datasets: [{
+          label: "AOV ($)",
+          data: ts.map(t => t.aov),
+          borderColor: "#2563eb",
+          backgroundColor: "rgba(37,99,235,0.08)",
+          borderWidth: 2,
+          pointRadius: ts.length <= 14 ? 4 : 2,
+          pointBackgroundColor: "#2563eb",
+          fill: true,
+          tension: 0.3,
+        },{
+          label: "Orders",
+          data: ts.map(t => t.orderCount),
+          borderColor: "#c89a10",
+          backgroundColor: "transparent",
+          borderWidth: 1.5,
+          borderDash: [4,3],
+          pointRadius: 0,
+          yAxisID: "y2",
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: {
+            position: "top",
+            labels: { boxWidth: 12, font: { size: 11 } }
+          },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => ctx.datasetIndex === 0
+                ? ` AOV: ${fmt$cents(ctx.raw)}`
+                : ` Orders: ${ctx.raw}`,
+            }
+          }
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { maxTicksLimit: 10 } },
+          y: {
+            position: "left",
+            grid: { color: "rgba(0,0,0,0.05)" },
+            ticks: { callback: (v) => "$" + v }
+          },
+          y2: {
+            position: "right",
+            grid: { display: false },
+            ticks: { callback: (v) => v + " ord" }
+          }
+        }
+      }
+    });
+
+    // ── UTM doughnut + table ──
+    setLoadingDone("utm");
+    const utmData = (d.utmBreakdown || []);
+    const utmLabels = utmData.map(u => `${u.source}/${u.medium}`);
+    destroyChart("utm");
+    const utmCtx = document.getElementById("chartUtm").getContext("2d");
+    charts["utm"] = new Chart(utmCtx, {
+      type: "doughnut",
+      data: {
+        labels: utmLabels,
+        datasets: [{
+          data: utmData.map(u => u.orderCount),
+          backgroundColor: PALETTE.slice(0, utmData.length),
+          borderWidth: 2,
+          borderColor: "#fff",
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: "62%",
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => ` ${ctx.label}: ${ctx.raw} orders (${fmt$cents(utmData[ctx.dataIndex].revenue)})`
+            }
+          }
+        }
+      }
+    });
+
+    // UTM legend
+    const legendEl = document.getElementById("utmLegend");
+    legendEl.innerHTML = utmData.slice(0, 8).map((u, i) => `
+      <div style="display:flex;align-items:center;gap:7px;margin-bottom:5px;">
+        <span style="width:10px;height:10px;border-radius:2px;background:${PALETTE[i]};flex-shrink:0;display:inline-block;"></span>
+        <span style="font-size:12px;color:var(--text);">${escHtml(u.source)}/<span style="color:var(--muted);">${escHtml(u.medium)}</span></span>
+        <span style="margin-left:auto;font-family:'DM Mono',monospace;font-size:11px;">${u.orderCount}</span>
+      </div>
+    `).join("");
+
+    // UTM table
+    const totalOrds = d.totalOrders || 1;
+    const tbody = document.getElementById("utmTableBody");
+    tbody.innerHTML = utmData.length === 0
+      ? `<tr><td colspan="4" style="padding:16px;text-align:center;color:var(--muted);">No UTM data in this window</td></tr>`
+      : utmData.map((u, i) => `
+        <tr>
+          <td>
+            <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${PALETTE[i]};margin-right:6px;"></span>
+            <strong>${escHtml(u.source)}</strong> / ${escHtml(u.medium)}
+            ${u.campaign ? `<span class="badge badge-gold" style="margin-left:6px;">${escHtml(u.campaign)}</span>` : ""}
+          </td>
+          <td class="font-mono">${fmtN(u.orderCount)}</td>
+          <td class="font-mono">${fmt$cents(u.revenue)}</td>
+          <td>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div style="flex:1;max-width:80px;background:#eef0f6;border-radius:3px;height:8px;overflow:hidden;">
+                <div style="height:100%;background:${PALETTE[i]};border-radius:3px;width:${Math.round(u.orderCount/totalOrds*100)}%;"></div>
+              </div>
+              <span class="font-mono" style="font-size:11px;">${Math.round(u.orderCount/totalOrds*100)}%</span>
+            </div>
+          </td>
+        </tr>
+      `).join("");
+
+  } catch (err) {
+    showError("sku", err.message);
+    showError("aov", err.message);
+    showError("utm", err.message);
+    // Set KPIs to error state
+    ["revenue","aov","shipping","orders","new","returning"].forEach(k => setKpi(k, '<span style="color:var(--red);font-size:14px;">Error</span>'));
+  }
+}
+
+// ─── Render: Inventory ────────────────────────────────────────────────────────
+async function loadInventory() {
+  clearError("inv");
+  document.getElementById("inv-loading").textContent = "Loading…";
+
+  try {
+    const d = await fetchData("shopify-inventory");
+    setLoadingDone("inv");
+
+    // Summary badges
+    const summaryEl = document.getElementById("invSummary");
+    summaryEl.innerHTML = `
+      <span class="badge badge-red">⚠ ${d.outOfStockCount} Out of stock</span>
+      <span class="badge badge-orange">🔴 ${d.criticalCount} Critical (&lt;10)</span>
+      <span class="badge badge-gold">🟡 ${d.lowCount} Low (&lt;50)</span>
+      <span class="badge badge-blue">📦 ${d.totalActiveVariantsTracked} tracked variants total</span>
+    `;
+
+    const tbody = document.getElementById("inventoryTableBody");
+    if (d.warnings.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" style="padding:16px;text-align:center;color:var(--green);">✓ All tracked variants are above the ${d.threshold}-unit threshold</td></tr>`;
+    } else {
+      tbody.innerHTML = d.warnings.map(w => {
+        const badgeClass = w.status === "out_of_stock" ? "badge-red" : w.status === "critical" ? "badge-orange" : "badge-gold";
+        const badgeLabel = w.status === "out_of_stock" ? "OUT OF STOCK" : w.status === "critical" ? "CRITICAL" : "LOW";
+        const variantLabel = w.variantTitle ? `<span style="color:var(--muted);font-size:11px;"> · ${escHtml(w.variantTitle)}</span>` : "";
+        return `
+          <tr>
+            <td>
+              <strong>${escHtml(w.productTitle)}</strong>${variantLabel}
+            </td>
+            <td class="font-mono" style="font-size:11px;">${escHtml(w.sku) || "—"}</td>
+            <td class="font-mono">
+              <strong style="color:${w.inventoryQuantity <= 0 ? "var(--red)" : w.inventoryQuantity < 10 ? "var(--orange)" : "var(--gold)"};">
+                ${w.inventoryQuantity}
+              </strong>
+            </td>
+            <td><span class="badge ${badgeClass}">${badgeLabel}</span></td>
+          </tr>
+        `;
+      }).join("");
+    }
+  } catch (err) {
+    showError("inv", err.message);
+  }
+}
+
+// ─── Render: Abandoned Checkouts ─────────────────────────────────────────────
+async function loadAbandoned() {
+  clearError("abandoned");
+  document.getElementById("abandoned-loading").textContent = "Loading…";
+
+  try {
+    const d = await fetchData("shopify-abandoned");
+    setLoadingDone("abandoned");
+
+    // KPIs
+    setKpi("abandonment", fmtPct(d.abandonmentRate), `${fmtPct(100 - d.abandonmentRate)} recovered`);
+    setKpi("abandoned-value", fmt$cents(d.totalAbandonedValue), `${d.abandoned} carts unrecovered`);
+
+    // Table
+    const tbody = document.getElementById("abandonedTableBody");
+    if (d.recentAbandoned.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--muted);">No abandoned checkouts in this window</td></tr>`;
+    } else {
+      tbody.innerHTML = d.recentAbandoned.map(c => `
+        <tr>
+          <td class="font-mono" style="font-size:11px;">${fmtDate(c.createdAt)}</td>
+          <td>${escHtml(c.firstItem)}</td>
+          <td class="font-mono">${c.itemCount}</td>
+          <td class="font-mono"><strong>${fmt$cents(c.value)}</strong></td>
+          <td style="font-size:11px;color:var(--muted);">${c.email ? escHtml(c.email) : "—"}</td>
+          <td>
+            ${c.url
+              ? `<a href="${escHtml(c.url)}" target="_blank" rel="noopener" style="color:var(--teal);font-size:11px;font-family:'DM Mono',monospace;">Recovery link ↗</a>`
+              : '<span style="color:var(--muted);font-size:11px;">—</span>'}
+          </td>
+        </tr>
+      `).join("");
+    }
+  } catch (err) {
+    showError("abandoned", err.message);
+    ["abandonment","abandoned-value"].forEach(k => setKpi(k, '<span style="color:var(--red);font-size:14px;">Error</span>'));
+  }
+}
+
+// ─── Render: Google Ads KPIs ──────────────────────────────────────────────────
+// Stores totalSpend for TACOS calculation (shared with orders total revenue)
+let _adSpend = null;
+let _totalRevenue = null;
+
+function computeTacos() {
+  if (_adSpend != null && _totalRevenue != null && _totalRevenue > 0) {
+    const tacos = (_adSpend / _totalRevenue) * 100;
+    setKpi("tacos", fmtPct(tacos), "Ad spend / total revenue");
+  }
+}
+
+async function loadGoogleAds() {
+  const loadingEl = document.getElementById("ads-loading");
+  if (loadingEl) loadingEl.textContent = "Loading…";
+
+  try {
+    const d = await fetchData("google-ads");
+    if (loadingEl) loadingEl.textContent = "";
+
+    // Google Ads not yet configured — show placeholder cards
+    if (d.configured === false) {
+      ["adspend","cpc","acos","tacos"].forEach(k => {
+        setKpi(k, '<span style="color:var(--muted);font-size:14px;">Not configured</span>', "");
+      });
+      document.getElementById("sub-adspend").textContent = "Set GOOGLE_ADS_* env vars in Netlify";
+      return;
+    }
+
+    _adSpend = d.totalSpend;
+    computeTacos();
+
+    setKpi("adspend", fmt$cents(d.totalSpend), `${fmtN(d.totalClicks)} clicks · ${fmtN(d.totalImpressions)} impr.`);
+    setKpi("cpc", fmt$cents(d.cpc), `CTR: ${fmtPct(d.ctr)}`);
+
+    if (d.acos !== null) {
+      const acosColor = d.acos > 50 ? "var(--red)" : d.acos > 30 ? "var(--orange)" : "var(--green)";
+      setKpi("acos", `<span style="color:${acosColor};">${fmtPct(d.acos)}</span>`, "Ad spend / ad-attributed revenue");
+    } else {
+      setKpi("acos", '<span style="color:var(--muted);font-size:14px;">No conv. data</span>', "Enable conversion tracking");
+    }
+
+  } catch (err) {
+    if (loadingEl) loadingEl.textContent = "Error";
+    ["adspend","cpc","acos","tacos"].forEach(k =>
+      setKpi(k, `<span style="color:var(--red);font-size:14px;">Error</span>`, "")
+    );
+    console.error("[google-ads]", err.message);
+  }
+}
+
+// ─── Load all & refresh ───────────────────────────────────────────────────────
+const AUTO_REFRESH_MS = 5 * 60 * 1000; // 5 minutes
+let autoRefreshTimer = null;
+let nextRefreshAt = null;
+
+async function loadAll() {
+  const btn = document.getElementById("globalRefresh");
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Refreshing…"; }
+
+  // Reset shared state for TACOS calculation
+  _adSpend = null;
+  _totalRevenue = null;
+
+  // All four load in parallel
+  await Promise.allSettled([
+    loadOrders(),
+    loadInventory(),
+    loadAbandoned(),
+    loadGoogleAds(),
+  ]);
+
+  const now = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+  const el = document.getElementById("lastRefreshed");
+  if (el) el.textContent = `Refreshed ${now}`;
+
+  if (btn) { btn.disabled = false; btn.textContent = "↻ Refresh All"; }
+
+  // Schedule next auto-refresh
+  scheduleNextRefresh();
+}
+
+function scheduleNextRefresh() {
+  if (autoRefreshTimer) clearTimeout(autoRefreshTimer);
+  nextRefreshAt = Date.now() + AUTO_REFRESH_MS;
+  autoRefreshTimer = setTimeout(() => { loadAll(); }, AUTO_REFRESH_MS);
+  updateNextRefreshLabel();
+}
+
+function updateNextRefreshLabel() {
+  const el = document.getElementById("nextRefresh");
+  if (!el) return;
+  const tick = () => {
+    if (document.hidden) return;
+    if (!nextRefreshAt) { el.textContent = ""; return; }
+    const left = Math.max(0, Math.ceil((nextRefreshAt - Date.now()) / 1000));
+    if (left <= 0) {
+      el.textContent = "Refreshing…";
+      return;
+    }
+    const m = Math.floor(left / 60);
+    const s = left % 60;
+    el.textContent = `Next refresh in ${m}:${String(s).padStart(2, "0")}`;
+  };
+  tick();
+  if (!window._refreshCountdown) {
+    window._refreshCountdown = setInterval(tick, 1000);
+  }
+}
+
+// Pause auto-refresh when tab is hidden, resume when visible
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    if (autoRefreshTimer) clearTimeout(autoRefreshTimer);
+    autoRefreshTimer = null;
+    const el = document.getElementById("nextRefresh");
+    if (el) el.textContent = "Paused (tab hidden)";
+  } else if (getToken()) {
+    scheduleNextRefresh();
+  }
+});
+
+// ─── Responsive grid fix for small screens ───────────────────────────────────
+function fixGrids() {
+  const w = window.innerWidth;
+  document.querySelectorAll(".kpi-row-1, .kpi-row-2, .kpi-row-ads").forEach(el => {
+    el.style.gridTemplateColumns = w < 640 ? "1fr 1fr" : "repeat(4,1fr)";
+  });
+}
+window.addEventListener("resize", fixGrids);
+fixGrids();
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+// Only load data if session is already active (gate is hidden)
+if (getToken()) {
+  loadAll();
+}
+</script>
+</body>
+</html>

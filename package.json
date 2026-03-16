@@ -1,0 +1,17 @@
+{
+  "name": "bhby-analytics-dashboard",
+  "version": "1.0.0",
+  "description": "BHBY Ad-Analytics Dashboard — Netlify serverless functions + Shopify Admin GraphQL",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "netlify dev",
+    "deploy": "netlify deploy --prod"
+  },
+  "devDependencies": {
+    "netlify-cli": "^17"
+  }
+}
