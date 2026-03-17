@@ -190,7 +190,7 @@ export default async function handler(req) {
   try {
     const accessToken = await getAccessToken(clientId, clientSecret, refreshToken);
 
-    // Query: daily performance for last 30 days
+    // Query: daily performance for last 30 days across all campaigns
     const gaql = `
       SELECT
         segments.date,
@@ -199,7 +199,7 @@ export default async function handler(req) {
         metrics.impressions,
         metrics.conversions,
         metrics.conversions_value
-      FROM customer
+      FROM campaign
       WHERE segments.date DURING LAST_30_DAYS
       ORDER BY segments.date ASC
     `;
