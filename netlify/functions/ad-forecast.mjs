@@ -1,0 +1,578 @@
+/**
+ * Netlify Function: ad-forecast
+ *
+ * Runs a blended multi-channel sales forecast for BHBY's Google Shopping +
+ * Klaviyo email flow campaigns launching April 2026.
+ *
+ * Channels modeled:
+ *   A. Google Shopping (bottom-up CPC/CVR)
+ *   B. Welcome Series (Klaviyo — new ad-driven subscribers)
+ *   C. Cart Abandonment Recovery (Klaviyo)
+ *   D. Win-Back Campaigns (Klaviyo — lapsed customer DB)
+ *
+ * Returns projections for $5K/mo and $10K/mo budget scenarios, each with
+ * conservative / base / aggressive estimates and Monte Carlo P10/P50/P90
+ * confidence intervals.
+ *
+ * Inventory output shows INCREMENTAL DTC units to add to retail production
+ * runs (retail/TJX channel is forecasted separately).
+ */
+
+import { verifyToken } from "./_auth-verify.mjs";
+
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Content-Type": "application/json",
+};
+
+// ─── Store baseline (from analysis_orders.json + analysis_customers.json) ─────
+const BASELINE = {
+  // Current organic DTC performance (trailing 12 months / annualized from 60d API window)
+  monthlyOrders: 79,           // avg orders/month (Feb 2025-Feb 2026: 949 orders / 12 months)
+  monthlyRevenue: 3940,        // avg revenue/month ($47,279 / 12)
+  aov: 49.82,                  // blended organic AOV (existing customers, returning + direct)
+  unitsPerOrder: 1.7,          // blended organic units/order
+
+  // Ad-driven AOV — blended branded search + non-branded Shopping.
+  // PRIMARY CAMPAIGN: branded search (warm — searched "behappybeyou", 6K+ TJX retail halo).
+  // PDP 3-offer anchoring: 1 / 3 / 5 tiers. 2-pack and 4-pack removed (92% rev was 1/3/5).
+  // LIVE AT LAUNCH: Glow & Restore ($57.99), Performance Stack ($57.99),
+  //   CYO 3-pack ($57.99 draft → going live). CYO 5-pack ($94.99) coming later.
+  //
+  // VERIFIED PRICES (Shopify API 2026-03-18):
+  //   1-bottle $19.99 + $5.99 ship = $25.98 | 3-pack $54.99 | 5-pack $89.99
+  //   Bundle/CYO-3 $57.99 | CYO-5 $94.99 (planned)
+  //
+  // Branded (50% 1-bot $25.98, 12% 3pk $54.99, 15% bundle $57.99,
+  //   8% 5pk $89.99, 5% CYO-5 $94.99, 10% other $25) = $42.74
+  // Non-branded (65% 1-bot, 10% 3pk, 10% bundle, 5% 5pk, 5% CYO-5, 5% other) = $38.69
+  // Blended (60/40 branded/non-branded): $41.12
+  // Industry: single-product avg $35, bundle-focused avg $89 (Wavesy/MHI 2026).
+  adDrivenAov: 41.00,
+  adDrivenUnitsPerOrder: 1.50,
+
+  // Email-flow traffic (welcome series, cart recovery) — engaged visitors.
+  // Klaviyo emails feature bundles with savings callouts → higher bundle attach.
+  emailFlowAov: 44.00,
+  emailFlowUnitsPerOrder: 1.60,
+
+  // Win-back — lapsed customers, already purchased. Near-organic behavior.
+  // Bundles strong for re-engagement ("try something new").
+  winbackAov: 47.00,
+  winbackUnitsPerOrder: 1.70,
+  blendedGmPct: 0.385,         // 38.5% blended gross margin
+  monthlyOrganicUnits: 134,    // 79 orders × 1.7 units/order
+
+  // Customer data
+  totalCustomers: 21307,
+  returningRatePct: 0.0934,    // 9.34% returning rate
+  lapsedOneTime: 5978,         // one-time buyers (addressable for win-back)
+  lapsedReturning: 1991,       // returning customers who haven't bought recently
+
+  // Abandoned carts
+  abandonedCartsPerMonth: 385, // ~1,154 / 3 months
+  emailRecoveryRateCurrent: 0, // 0% current recovery — all upside
+
+  // Organic product mix (from top_products_by_revenue, % of units sold)
+  organicProductMix: [
+    { name: "Melatonin + B6",    handle: "melatonin",  share: 0.244 },
+    { name: "Turmeric & Ginger", handle: "turmeric",   share: 0.174 },
+    { name: "Biotin 10,000 MCG", handle: "biotin",     share: 0.164 },
+    { name: "Calm & Stress",     handle: "calm",        share: 0.123 },
+    { name: "Magnesium",         handle: "magnesium",   share: 0.060 },
+    { name: "Mushroom Sea Moss", handle: "mushroom",    share: 0.044 },
+    { name: "ACV Gummy",         handle: "acv",         share: 0.032 },
+    { name: "Brain Support",     handle: "brain",       share: 0.032 },
+    { name: "Beetroot",          handle: "beetroot",    share: 0.030 },
+    { name: "Fiber Gummy",       handle: "fiber",       share: 0.025 },
+    { name: "Other Products",    handle: "other",       share: 0.072 },
+  ],
+
+  // Ad-driven product mix — based on Google Shopping search volume for supplement keywords.
+  // Biotin, Turmeric, ACV have massive Shopping search volume.
+  // Beetroot is trending with low competition.  Melatonin has high volume but extreme competition.
+  adDrivenProductMix: [
+    { name: "Biotin 10,000 MCG", handle: "biotin",     share: 0.260 },
+    { name: "Turmeric & Ginger", handle: "turmeric",   share: 0.200 },
+    { name: "ACV Gummy",         handle: "acv",         share: 0.110 },
+    { name: "Melatonin + B6",    handle: "melatonin",  share: 0.120 },
+    { name: "Magnesium",         handle: "magnesium",   share: 0.090 },
+    { name: "Beetroot",          handle: "beetroot",    share: 0.070 },
+    { name: "Calm & Stress",     handle: "calm",        share: 0.060 },
+    { name: "Mushroom Sea Moss", handle: "mushroom",    share: 0.040 },
+    { name: "Brain Support",     handle: "brain",       share: 0.020 },
+    { name: "Fiber Gummy",       handle: "fiber",       share: 0.015 },
+    { name: "Other Products",    handle: "other",       share: 0.015 },
+  ],
+};
+
+// ─── Forecast assumptions (conservative / base / aggressive) ─────────────────
+const ASSUMPTIONS = {
+  // Google Shopping CPC — supplement DTC benchmarks
+  // Sources: WordStream Health category, Tinuiti DTC Shopping report, Common Thread Collective
+  cpc: { conservative: 1.80, base: 1.20, aggressive: 0.80 },
+
+  // Shopping CVR — industry benchmark for supplement brands
+  // Sources: Shopify Plus DTC benchmarks, Tinuiti supplement vertical data
+  // Applied BEFORE store uplift multiplier
+  shoppingCvr: { conservative: 0.018, base: 0.025, aggressive: 0.035 },
+
+  // Store + retail halo CVR uplift multiplier
+  // Accounts for: page speed, CRO PDPs, subscription, free ship threshold, 6K+ TJX retail stores
+  storeUplift: { conservative: 1.45, base: 1.575, aggressive: 1.70 },
+
+  // Campaign ramp + seasonality factors by month (Apr 2026 – Mar 2027).
+  // Combines Google PMax learning phase ramp (months 1-3) with supplement demand seasonality.
+  //              Apr   May   Jun   Jul   Aug   Sep   Oct   Nov   Dec   Jan   Feb   Mar
+  rampFactors: [0.55, 0.65, 0.85, 0.90, 0.82, 1.05, 1.10, 1.20, 0.92, 1.35, 1.08, 1.00],
+  // Jul/Aug: summer slump. Sep-Oct: back-to-wellness. Nov: BFCM boost.
+  // Dec: post-BFCM hangover. Jan: New Year resolution peak. Feb: resolution tail.
+
+  // CPC seasonality multiplier — Q4 competition inflates CPCs.
+  //               Apr  May  Jun  Jul  Aug  Sep  Oct  Nov   Dec  Jan  Feb  Mar
+  cpcSeasonality: [1.0, 1.0, 1.0, 0.95, 0.90, 1.0, 1.15, 1.55, 1.40, 1.15, 1.0, 1.0],
+  // Nov CPC spike: BFCM competition across all advertisers.
+  // Dec: lingering holiday competition. Jan: supplement brands bidding on resolutions.
+
+  // Email capture rate — % of ad-driven site visitors who subscribe to email
+  emailCaptureRate: { conservative: 0.10, base: 0.15, aggressive: 0.20 },
+
+  // Welcome series CVR — % of new subscribers who purchase within 30 days
+  // Source: Klaviyo benchmark reports
+  welcomeCvr: { conservative: 0.05, base: 0.08, aggressive: 0.12 },
+
+  // Cart abandonment recovery rate — % of ad-driven abandoned carts recovered by Klaviyo
+  // Source: Klaviyo, Omnisend industry benchmarks
+  cartRecoveryRate: { conservative: 0.05, base: 0.10, aggressive: 0.15 },
+
+  // % of ad sessions that abandon cart (don't convert)
+  cartAbandonRate: 0.70,
+
+  // Win-back reactivation rate — % of lapsed customers reactivated over 12 months
+  // Source: Retention.com, Klaviyo lapsed customer benchmarks
+  winbackRate: { conservative: 0.02, base: 0.035, aggressive: 0.05 },
+
+  // Budget-dependent efficiency penalties — diminishing returns at higher spend.
+  // At $10K/mo you exhaust cheap inventory and bid into more competitive auctions.
+  budgetEfficiency: {
+    5000:  { cpcMultiplier: 1.00, cvrMultiplier: 1.00 },
+    10000: { cpcMultiplier: 1.15, cvrMultiplier: 0.90 },
+  },
+
+  // Inventory safety stock multiplier
+  safetyStockMultiplier: 1.25,
+
+  // Manufacturing lead time
+  leadTimeWeeks: 2,
+  recommendedOrderLeadWeeks: 3,
+};
+
+// ─── Monthly labels (April 2026 launch) ──────────────────────────────────────
+// Use explicit UTC to avoid timezone drift (e.g. midnight UTC-5 → March 31).
+const LAUNCH_DATE = new Date(Date.UTC(2026, 3, 1));
+const MONTHS = Array.from({ length: 12 }, (_, i) => {
+  const d = new Date(LAUNCH_DATE);
+  d.setUTCMonth(d.getUTCMonth() + i);
+  return d.toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+});
+
+// ─── Monte Carlo simulation ───────────────────────────────────────────────────
+function triangularSample(min, mode, max) {
+  if (min >= max) return mode;
+  const m = Math.max(min, Math.min(max, mode));
+  const u = Math.random();
+  const fc = (m - min) / (max - min);
+  if (u < fc) return min + Math.sqrt(u * (max - min) * (m - min));
+  return max - Math.sqrt((1 - u) * (max - min) * (max - m));
+}
+
+// A = per-request assumptions copy (never the module-level const)
+function runMonteCarlo(budgetPerMonth, A, iterations = 10000) {
+  const annualRevenues = [];
+  const annualUnits = [];
+  const eff = A.budgetEfficiency?.[budgetPerMonth] ?? { cpcMultiplier: 1, cvrMultiplier: 1 };
+
+  for (let i = 0; i < iterations; i++) {
+    const cpc         = triangularSample(A.cpc.aggressive, A.cpc.base, A.cpc.conservative) * eff.cpcMultiplier;
+    const cvr         = triangularSample(A.shoppingCvr.conservative, A.shoppingCvr.base, A.shoppingCvr.aggressive) * eff.cvrMultiplier;
+    const uplift      = triangularSample(A.storeUplift.conservative, A.storeUplift.base, A.storeUplift.aggressive);
+    const emailCapt   = triangularSample(A.emailCaptureRate.conservative, A.emailCaptureRate.base, A.emailCaptureRate.aggressive);
+    const welcomeCvr  = triangularSample(A.welcomeCvr.conservative, A.welcomeCvr.base, A.welcomeCvr.aggressive);
+    const cartRecovery= triangularSample(A.cartRecoveryRate.conservative, A.cartRecoveryRate.base, A.cartRecoveryRate.aggressive);
+    const winback     = triangularSample(A.winbackRate.conservative, A.winbackRate.base, A.winbackRate.aggressive);
+
+    let totalRev = 0;
+    let totalUnits = 0;
+
+    for (let m = 0; m < 12; m++) {
+      const ramp        = A.rampFactors[m];
+      const seasonalCpc = cpc * (A.cpcSeasonality?.[m] ?? 1.0);
+      const clicks      = budgetPerMonth / seasonalCpc;
+
+      // Channel A: Shopping (cold traffic — single bottle AOV)
+      const effectiveCvr        = cvr * uplift;
+      const shoppingConversions = clicks * effectiveCvr * ramp;
+      const shoppingRev         = shoppingConversions * BASELINE.adDrivenAov;
+
+      // Channel B: Welcome series (only subscribers who did NOT already convert)
+      const nonConvertFrac     = Math.max(0, 1 - effectiveCvr);
+      const newSubscribers     = clicks * emailCapt * nonConvertFrac * ramp;
+      const welcomeConversions = newSubscribers * welcomeCvr;
+      const welcomeRev         = welcomeConversions * BASELINE.emailFlowAov;
+
+      // Channel C: Cart abandonment (ad-driven carts only in MC; organic added separately)
+      const adAbandonedCarts  = clicks * nonConvertFrac * A.cartAbandonRate * ramp;
+      const cartConversions   = adAbandonedCarts * cartRecovery;
+      const cartRev           = cartConversions * BASELINE.emailFlowAov;
+
+      // Channel D: Win-back (lapsed customers know the brand — higher AOV)
+      const addressableLapsed  = BASELINE.lapsedOneTime + BASELINE.lapsedReturning;
+      const winbackConversions = m === 0 ? addressableLapsed * winback * 0.6
+        : m < 3 ? addressableLapsed * winback * 0.2 / 2
+        : addressableLapsed * winback * 0.2 / 9;
+      const winbackRev = winbackConversions * BASELINE.winbackAov;
+
+      // Channel E: Organic abandoned cart recovery (existing 385/mo with 0% current recovery)
+      const organicCartConversions = BASELINE.abandonedCartsPerMonth * cartRecovery;
+      const organicCartRev         = organicCartConversions * BASELINE.emailFlowAov;
+
+      totalRev   += shoppingRev + welcomeRev + cartRev + winbackRev + organicCartRev;
+      totalUnits += shoppingConversions * BASELINE.adDrivenUnitsPerOrder
+                  + welcomeConversions  * BASELINE.emailFlowUnitsPerOrder
+                  + cartConversions     * BASELINE.emailFlowUnitsPerOrder
+                  + winbackConversions  * BASELINE.winbackUnitsPerOrder
+                  + organicCartConversions * BASELINE.emailFlowUnitsPerOrder;
+    }
+
+    annualRevenues.push(totalRev);
+    annualUnits.push(totalUnits);
+  }
+
+  annualRevenues.sort((a, b) => a - b);
+  annualUnits.sort((a, b) => a - b);
+
+  const p = (arr, pct) => arr[Math.floor(arr.length * pct)];
+
+  return {
+    revenue: {
+      p10: Math.round(p(annualRevenues, 0.10)),
+      p50: Math.round(p(annualRevenues, 0.50)),
+      p90: Math.round(p(annualRevenues, 0.90)),
+    },
+    units: {
+      p10: Math.round(p(annualUnits, 0.10)),
+      p50: Math.round(p(annualUnits, 0.50)),
+      p90: Math.round(p(annualUnits, 0.90)),
+    },
+  };
+}
+
+// ─── Deterministic forecast for a given scenario tier ────────────────────────
+// A = per-request assumptions copy
+function forecastScenario(budgetPerMonth, tier, A) {
+  const eff         = A.budgetEfficiency?.[budgetPerMonth] ?? { cpcMultiplier: 1, cvrMultiplier: 1 };
+  const cpc         = A.cpc[tier] * eff.cpcMultiplier;
+  const cvr         = A.shoppingCvr[tier] * eff.cvrMultiplier;
+  const uplift      = A.storeUplift[tier];
+  const emailCapture= A.emailCaptureRate[tier];
+  const welcomeCvr  = A.welcomeCvr[tier];
+  const cartRecovery= A.cartRecoveryRate[tier];
+  const winbackRate = A.winbackRate[tier];
+
+  const addressableLapsed = BASELINE.lapsedOneTime + BASELINE.lapsedReturning;
+  const monthly = [];
+
+  for (let m = 0; m < 12; m++) {
+    const ramp        = A.rampFactors[m];
+    const seasonalCpc = cpc * (A.cpcSeasonality?.[m] ?? 1.0);
+    const clicks      = budgetPerMonth / seasonalCpc;
+
+    // Channel A: Shopping conversions (cold traffic — single bottle AOV)
+    const effectiveCvr        = cvr * uplift;
+    const shoppingConversions = clicks * effectiveCvr * ramp;
+    const shoppingOrders      = Math.round(shoppingConversions);
+    const shoppingRev         = shoppingConversions * BASELINE.adDrivenAov;
+    const shoppingUnits       = shoppingConversions * BASELINE.adDrivenUnitsPerOrder;
+
+    // Channel B: Welcome series (only non-converters who subscribed)
+    const nonConvertFrac     = Math.max(0, 1 - effectiveCvr);
+    const newSubscribers     = clicks * emailCapture * nonConvertFrac * ramp;
+    const welcomeConversions = newSubscribers * welcomeCvr;
+    const welcomeOrders      = Math.round(welcomeConversions);
+    const welcomeRev         = welcomeConversions * BASELINE.emailFlowAov;
+    const welcomeUnits       = welcomeConversions * BASELINE.emailFlowUnitsPerOrder;
+
+    // Channel C: Ad-driven cart abandonment recovery
+    const adAbandonedCarts = clicks * nonConvertFrac * A.cartAbandonRate * ramp;
+    const cartConversions  = adAbandonedCarts * cartRecovery;
+    const cartOrders       = Math.round(cartConversions);
+    const cartRev          = cartConversions * BASELINE.emailFlowAov;
+    const cartUnits        = cartConversions * BASELINE.emailFlowUnitsPerOrder;
+
+    // Channel D: Win-back (lapsed customers — higher AOV, they know the brand)
+    const winbackConversions = m === 0 ? addressableLapsed * winbackRate * 0.6
+      : m < 3 ? addressableLapsed * winbackRate * 0.2 / 2
+      : addressableLapsed * winbackRate * 0.2 / 9;
+    const winbackOrders = Math.round(winbackConversions);
+    const winbackRev    = winbackConversions * BASELINE.winbackAov;
+    const winbackUnits  = winbackConversions * BASELINE.winbackUnitsPerOrder;
+
+    // Channel E: Organic abandoned cart recovery (385 existing carts/mo, 0% current recovery)
+    const organicCartConversions = BASELINE.abandonedCartsPerMonth * cartRecovery;
+    const organicCartOrders      = Math.round(organicCartConversions);
+    const organicCartRev         = organicCartConversions * BASELINE.emailFlowAov;
+    const organicCartUnits       = organicCartConversions * BASELINE.emailFlowUnitsPerOrder;
+
+    const totalConversions = shoppingConversions + welcomeConversions + cartConversions + winbackConversions + organicCartConversions;
+    const totalOrders = Math.round(totalConversions);
+    const totalRev = shoppingRev + welcomeRev + cartRev + winbackRev + organicCartRev;
+    const totalUnits = Math.round(shoppingUnits + welcomeUnits + cartUnits + winbackUnits + organicCartUnits);
+    const gp = totalRev * BASELINE.blendedGmPct;
+    const roas = budgetPerMonth > 0 ? totalRev / budgetPerMonth : 0;
+
+    monthly.push({
+      monthIndex: m + 1,
+      monthLabel: MONTHS[m],
+      rampFactor: ramp,
+      totalOrders,
+      totalRevenue: Math.round(totalRev),
+      totalUnits,
+      grossProfit: Math.round(gp),
+      roas: Math.round(roas * 100) / 100,
+      byChannel: {
+        shopping:         { orders: shoppingOrders,     revenue: Math.round(shoppingRev),     units: Math.round(shoppingUnits) },
+        welcomeSeries:    { orders: welcomeOrders,      revenue: Math.round(welcomeRev),      units: Math.round(welcomeUnits) },
+        cartRecovery:     { orders: cartOrders,          revenue: Math.round(cartRev),         units: Math.round(cartUnits) },
+        winback:          { orders: winbackOrders,       revenue: Math.round(winbackRev),      units: Math.round(winbackUnits) },
+        organicCartRecov: { orders: organicCartOrders,   revenue: Math.round(organicCartRev),  units: Math.round(organicCartUnits) },
+      },
+    });
+  }
+
+  // Steady state = average of months 4-12 (post-ramp)
+  const steadyStateMonths  = monthly.slice(3);
+  const steadyStateRevenue = Math.round(steadyStateMonths.reduce((s, m) => s + m.totalRevenue, 0) / steadyStateMonths.length);
+  const steadyStateOrders  = Math.round(steadyStateMonths.reduce((s, m) => s + m.totalOrders, 0)  / steadyStateMonths.length);
+  const steadyStateUnits   = Math.round(steadyStateMonths.reduce((s, m) => s + m.totalUnits, 0)   / steadyStateMonths.length);
+  const steadyStateRoas    = Math.round(steadyStateMonths.reduce((s, m) => s + m.roas, 0)         / steadyStateMonths.length * 100) / 100;
+
+  const annualTotals = {
+    revenue: monthly.reduce((s, m) => s + m.totalRevenue, 0),
+    orders:  monthly.reduce((s, m) => s + m.totalOrders, 0),
+    units:   monthly.reduce((s, m) => s + m.totalUnits, 0),
+    gp:      monthly.reduce((s, m) => s + m.grossProfit, 0),
+    adSpend: budgetPerMonth * 12,
+    roas:    Math.round((monthly.reduce((s, m) => s + m.totalRevenue, 0) / (budgetPerMonth * 12)) * 100) / 100,
+  };
+
+  return { monthly, steadyState: { revenue: steadyStateRevenue, orders: steadyStateOrders, units: steadyStateUnits, roas: steadyStateRoas }, annualTotals };
+}
+
+// ─── Inventory forecast ───────────────────────────────────────────────────────
+// Uses organic mix for organic units, ad-driven mix for ad units, then merges per product.
+function buildInventoryForecast(baseMonthly, A) {
+  // Build a lookup: handle → ad share
+  const adMixByHandle = {};
+  for (const p of BASELINE.adDrivenProductMix) adMixByHandle[p.handle] = p.share;
+
+  return BASELINE.organicProductMix.map(product => {
+    const adShare = adMixByHandle[product.handle] ?? 0;
+
+    const monthlyBreakdown = MONTHS.map((label, i) => {
+      const organicUnits  = Math.round(BASELINE.monthlyOrganicUnits * product.share);
+      const adUnits       = Math.round(baseMonthly[i].totalUnits * adShare);
+      const totalDtcUnits = organicUnits + adUnits;
+      const safetyStock   = Math.round(totalDtcUnits * A.safetyStockMultiplier);
+      return {
+        monthLabel: label,
+        organicUnits,
+        adDrivenUnits: adUnits,
+        totalDtcUnits,
+        safetyStock,
+        addToProductionRun: safetyStock,
+      };
+    });
+
+    const peakMonth = monthlyBreakdown.reduce((max, m) => m.addToProductionRun > max.addToProductionRun ? m : max);
+    const avgMonthlyDtcUnits = Math.round(monthlyBreakdown.reduce((s, m) => s + m.totalDtcUnits, 0) / 12);
+
+    return {
+      ...product,
+      adShare,
+      monthlyBreakdown,
+      peakMonth: peakMonth.monthLabel,
+      peakUnits: peakMonth.addToProductionRun,
+      avgMonthlyDtcUnits,
+      annualDtcUnits: monthlyBreakdown.reduce((s, m) => s + m.totalDtcUnits, 0),
+    };
+  });
+}
+
+// ─── Handler ──────────────────────────────────────────────────────────────────
+export default async function handler(req) {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS });
+  }
+
+  try {
+    const authError = verifyToken(req);
+    if (authError) return authError;
+    // Allow overriding assumptions via query params (for interactive sliders).
+    // IMPORTANT: we build a per-request deep copy of ASSUMPTIONS so that module-level
+    // state is never mutated — Netlify reuses warm function instances across requests.
+    const url = new URL(req.url);
+    const overrides = {
+      cpcBase:      parseFloat(url.searchParams.get("cpcBase"))      || null,
+      cvrBase:      parseFloat(url.searchParams.get("cvrBase"))      || null,
+      emailCapture: parseFloat(url.searchParams.get("emailCapture")) || null,
+      cartRecovery: parseFloat(url.searchParams.get("cartRecovery")) || null,
+      winbackRate:  parseFloat(url.searchParams.get("winbackRate"))  || null,
+      safetyStock:  parseFloat(url.searchParams.get("safetyStock"))  || null,
+    };
+
+    // Deep-copy mutable assumption tiers so concurrent requests don't bleed into each other.
+    const A = {
+      cpc:              { ...ASSUMPTIONS.cpc },
+      shoppingCvr:      { ...ASSUMPTIONS.shoppingCvr },
+      storeUplift:      { ...ASSUMPTIONS.storeUplift },
+      emailCaptureRate: { ...ASSUMPTIONS.emailCaptureRate },
+      welcomeCvr:       { ...ASSUMPTIONS.welcomeCvr },
+      cartRecoveryRate: { ...ASSUMPTIONS.cartRecoveryRate },
+      winbackRate:      { ...ASSUMPTIONS.winbackRate },
+      rampFactors:       ASSUMPTIONS.rampFactors,       // read-only, safe to share
+      cpcSeasonality:    ASSUMPTIONS.cpcSeasonality,   // read-only, safe to share
+      budgetEfficiency:  ASSUMPTIONS.budgetEfficiency,  // read-only, safe to share
+      cartAbandonRate:   ASSUMPTIONS.cartAbandonRate,
+      safetyStockMultiplier:        ASSUMPTIONS.safetyStockMultiplier,
+      leadTimeWeeks:                ASSUMPTIONS.leadTimeWeeks,
+      recommendedOrderLeadWeeks:    ASSUMPTIONS.recommendedOrderLeadWeeks,
+    };
+
+    // Apply overrides to the per-request copy only.
+    if (overrides.cpcBase) {
+      const delta = overrides.cpcBase - A.cpc.base;
+      A.cpc.conservative += delta;
+      A.cpc.base = overrides.cpcBase;
+      A.cpc.aggressive = Math.max(0.40, A.cpc.aggressive + delta);
+    }
+    if (overrides.cvrBase) {
+      A.shoppingCvr.base = overrides.cvrBase / 100;
+      A.shoppingCvr.conservative = Math.max(0.005, overrides.cvrBase / 100 * 0.72);
+      A.shoppingCvr.aggressive   = Math.min(0.08,  overrides.cvrBase / 100 * 1.40);
+    }
+    if (overrides.emailCapture) {
+      const ratio = (overrides.emailCapture / 100) / ASSUMPTIONS.emailCaptureRate.base;
+      A.emailCaptureRate.conservative = Math.max(0.01, ASSUMPTIONS.emailCaptureRate.conservative * ratio);
+      A.emailCaptureRate.base         = overrides.emailCapture / 100;
+      A.emailCaptureRate.aggressive   = Math.min(0.50, ASSUMPTIONS.emailCaptureRate.aggressive * ratio);
+    }
+    if (overrides.cartRecovery) {
+      const ratio = (overrides.cartRecovery / 100) / ASSUMPTIONS.cartRecoveryRate.base;
+      A.cartRecoveryRate.conservative = Math.max(0.005, ASSUMPTIONS.cartRecoveryRate.conservative * ratio);
+      A.cartRecoveryRate.base         = overrides.cartRecovery / 100;
+      A.cartRecoveryRate.aggressive   = Math.min(0.40, ASSUMPTIONS.cartRecoveryRate.aggressive * ratio);
+    }
+    if (overrides.winbackRate) {
+      const ratio = (overrides.winbackRate / 100) / ASSUMPTIONS.winbackRate.base;
+      A.winbackRate.conservative = Math.max(0.002, ASSUMPTIONS.winbackRate.conservative * ratio);
+      A.winbackRate.base         = overrides.winbackRate / 100;
+      A.winbackRate.aggressive   = Math.min(0.15, ASSUMPTIONS.winbackRate.aggressive * ratio);
+    }
+    if (overrides.safetyStock)  A.safetyStockMultiplier = overrides.safetyStock;
+
+    // Run deterministic scenarios for both budgets
+    const budgets = { "5k": 5000, "10k": 10000 };
+    const scenarios = {};
+
+    for (const [key, budget] of Object.entries(budgets)) {
+      const conservative = forecastScenario(budget, "conservative", A);
+      const base         = forecastScenario(budget, "base",         A);
+      const aggressive   = forecastScenario(budget, "aggressive",   A);
+      const monteCarlo   = runMonteCarlo(budget, A, 10000);
+
+      // Inventory based on base scenario
+      const inventory = buildInventoryForecast(base.monthly, A);
+
+      scenarios[key] = {
+        budgetPerMonth: budget,
+        conservative,
+        base,
+        aggressive,
+        monteCarlo,
+        inventory,
+        // Convenience: combined monthly arrays for charting (conservative/base/aggressive revenue)
+        chartData: {
+          months: MONTHS,
+          revenue: {
+            conservative: conservative.monthly.map(m => m.totalRevenue),
+            base:         base.monthly.map(m => m.totalRevenue),
+            aggressive:   aggressive.monthly.map(m => m.totalRevenue),
+          },
+          channelBreakdown: base.monthly.map(m => ({
+            month: m.monthLabel,
+            shopping:         m.byChannel.shopping.revenue,
+            welcomeSeries:    m.byChannel.welcomeSeries.revenue,
+            cartRecovery:     m.byChannel.cartRecovery.revenue,
+            winback:          m.byChannel.winback.revenue,
+            organicCartRecov: m.byChannel.organicCartRecov.revenue,
+          })),
+        },
+      };
+    }
+
+    const result = {
+      generatedAt: new Date().toISOString(),
+      launchDate: "2026-04-01",
+      forecastHorizon: "Apr 2026 – Mar 2027 (12 months)",
+      baseline: {
+        monthlyOrders: BASELINE.monthlyOrders,
+        monthlyRevenue: BASELINE.monthlyRevenue,
+        aov: BASELINE.aov,
+        unitsPerOrder: BASELINE.unitsPerOrder,
+        blendedGmPct: BASELINE.blendedGmPct,
+        monthlyOrganicUnits: BASELINE.monthlyOrganicUnits,
+        lapsedCustomers: BASELINE.lapsedOneTime + BASELINE.lapsedReturning,
+        abandonedCartsPerMonth: BASELINE.abandonedCartsPerMonth,
+        dataSource: "Shopify Admin API — 949 paid orders, Feb 2025–Feb 2026",
+      },
+      assumptions: {
+        cpc: A.cpc,
+        shoppingCvr: A.shoppingCvr,
+        storeUplift: A.storeUplift,
+        emailCaptureRate: A.emailCaptureRate,
+        welcomeCvr: A.welcomeCvr,
+        cartRecoveryRate: A.cartRecoveryRate,
+        winbackRate: A.winbackRate,
+        safetyStockMultiplier: A.safetyStockMultiplier,
+        leadTimeWeeks: A.leadTimeWeeks,
+        recommendedOrderLeadWeeks: A.recommendedOrderLeadWeeks,
+      },
+      scenarios,
+      methodology: {
+        model: "Blended Multi-Channel with Monte Carlo Simulation",
+        monteCarlo: {
+          iterations: 10000,
+          distributionType: "Triangular (min=conservative, mode=base, max=aggressive)",
+          outputs: "P10 (pessimistic), P50 (most likely), P90 (optimistic) annual revenue and units",
+        },
+        historicalData: {
+          source: "Client-provided screenshot + CSV export (API pending production approval)",
+          totalSpend: 6712.42,
+          totalClicks: 12000,
+          totalImpressions: 234388,
+          totalConversions: 1050,
+          campaignType: "BRANDED_SEARCH — not directly comparable to Google Shopping",
+        },
+        storeImprovementsNote: "CVR uplifts are cumulative since 2022 campaigns. Store is now CRO-optimized on Botanical OS 2.0 with subscription, lower free ship threshold, and better PDPs.",
+        retailHaloNote: "6,000+ TJX retail stores (TJ Maxx, Marshalls, HomeGoods, Sierra) create brand recognition that increases online CVR for shoppers who've seen the product in-store.",
+        moqNote: "Manufacturer MOQ is 6,000 units per SKU. Incremental DTC units should be added to retail production runs — if combined DTC + retail demand exceeds 6K, no separate MOQ run is required.",
+      },
+    };
+
+    return new Response(JSON.stringify(result), { status: 200, headers: CORS });
+  } catch (err) {
+    console.error("[ad-forecast]", err);
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: CORS });
+  }
+}
