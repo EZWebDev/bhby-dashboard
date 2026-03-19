@@ -780,7 +780,7 @@
 
       </div>
       <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:11px;color:var(--muted);">Fixed: AOV — Shopping $39 · Branded $43 · Email $44 · Win-back $47 · Sub renewal $38 · GM 38.5% · Store uplift 1.575× · Sub retention 75%/cycle · 2-mo interval</span>
+        <span style="font-size:11px;color:var(--muted);">Fixed: AOV — Shopping $39 · Branded $43 · Email $44 · Win-back $47 · Sub renewal $38 · GM 45% · Store uplift 1.575× · Sub retention 75%/cycle · 2-mo interval · ATC rate 12% · Cart abandon 70% (Baymard) · Branded click cap 1,500/mo</span>
         <button onclick="resetSliders()" style="padding:6px 14px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-family:'DM Mono',monospace;font-size:11px;cursor:pointer;color:var(--text);">Reset to defaults</button>
       </div>
     </div>
@@ -802,10 +802,13 @@
         <div class="font-mono" style="font-size:11px;color:#0369a1;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">Executive Summary</div>
         <p style="font-size:13px;color:var(--text);margin:0;line-height:1.7;">
           This forecast uses a <strong>blended 7-channel model</strong> combining bottom-up Google Shopping projections,
-          a dedicated <strong>branded search channel</strong> (leveraging historical campaign success and TJX retail halo),
-          Klaviyo email flow modeling, and <strong>subscription renewal LTV</strong> (cohort-based, 2-month interval with 75% retention).
+          a dedicated <strong>branded search channel</strong> (volume-capped with budget rollover, leveraging TJX retail halo),
+          Klaviyo email flow modeling (with proper add-to-cart funnel and Klaviyo flow deduplication),
+          and <strong>subscription renewal LTV</strong> (cohort-based, 2-month interval with 75% retention).
+          Campaign ramp (PMax learning phase) and demand seasonality are modeled independently.
           All assumptions are grounded in (1) BHBY's actual historical Google Ads data,
-          (2) current Shopify store performance, and (3) published industry benchmarks for supplement DTC brands.
+          (2) current Shopify store performance, (3) published industry benchmarks for supplement DTC brands,
+          and (4) verified Shopify product pricing (API pull 2026-03-18).
           Projections include conservative, base, and aggressive scenarios with Monte Carlo confidence intervals from
           10,000 iterations. These numbers reflect incremental DTC/Shopify revenue only — retail (TJX) channel is forecasted separately.
         </p>
@@ -903,7 +906,7 @@
               <div style="color:var(--muted);margin-top:3px;">6,000+ TJX stores build brand recognition online</div>
             </div>
           </div>
-          <p style="font-size:11px;color:var(--muted);margin-top:8px;">Multipliers are applied multiplicatively (not additively). Combined effect = <strong>1.45×–1.7× base Shopping CVR</strong>.</p>
+          <p style="font-size:11px;color:var(--muted);margin-top:8px;">Multipliers are applied multiplicatively (not additively). Combined effect = <strong>1.45×–1.7× base Shopping CVR</strong>. Campaign learning ramp and demand seasonality are modeled as separate factors (not combined into a single ramp curve).</p>
         </div>
       </div>
 
@@ -925,6 +928,7 @@
               <tr><td>Klaviyo cart abandonment recovery</td><td class="font-mono">5–15%</td><td style="color:var(--muted);">Klaviyo, Omnisend industry benchmarks</td></tr>
               <tr><td>Win-back reactivation rate</td><td class="font-mono">2–5%</td><td style="color:var(--muted);">Retention.com, Klaviyo lapsed customer data</td></tr>
               <tr><td>Email capture rate from paid traffic</td><td class="font-mono">10–20%</td><td style="color:var(--muted);">Klaviyo, Postscript DTC benchmarks</td></tr>
+              <tr><td>Add-to-cart rate — Shopping PDP traffic</td><td class="font-mono">8–18%</td><td style="color:var(--muted);">Shopify DTC benchmarks, BHBY actual (385 carts / ~2,600 sessions = 14.8%)</td></tr>
               <tr><td>Branded search CPC — supplement brand terms</td><td class="font-mono">$0.40–$1.00</td><td style="color:var(--muted);">BHBY historical ($0.56), WordStream branded benchmarks</td></tr>
               <tr><td>Branded search CVR — warm traffic</td><td class="font-mono">5–12%</td><td style="color:var(--muted);">BHBY historical (8.75% unoptimized), Google Ads industry data</td></tr>
               <tr><td>Subscribe & save adoption rate — supplement DTC</td><td class="font-mono">15–30%</td><td style="color:var(--muted);">ReCharge, Bold Commerce supplement vertical reports</td></tr>
@@ -945,7 +949,7 @@
             <p style="margin:0 0 10px;">The model runs <strong>10,000 independent simulations</strong>. Each simulation randomly samples all key variables from triangular probability distributions:</p>
             <ul style="padding-left:16px;margin:0 0 10px;">
               <li><strong>Triangular distribution</strong>: has a minimum (conservative), most likely value (base), and maximum (aggressive). More realistic than uniform random — values cluster around the most likely case.</li>
-              <li>Variables sampled: CPC, Shopping CVR, store uplift factor, email capture rate, welcome series CVR, cart recovery rate, win-back rate.</li>
+              <li>Variables sampled: CPC, Shopping CVR, store uplift, branded CPC/CVR, branded click cap, email capture rate, add-to-cart rate, welcome CVR, cart recovery rate, win-back rate, subscription adoption.</li>
               <li>Each simulation runs all 12 months independently and computes total annual revenue and units.</li>
             </ul>
             <p style="margin:0 0 10px;">After 10,000 runs, results are sorted and percentiles extracted:</p>
@@ -972,8 +976,9 @@
               <li><strong>CVR: 5–10%</strong> (no store uplift applied — branded buyers are already warm). Historical CVR was 8.75% on the unoptimized store.</li>
               <li><strong>AOV: $43</strong> vs Shopping $39. Brand-familiar buyers have higher multi-pack/bundle attach rates from TJX exposure.</li>
               <li><strong>Budget allocation: $1,750/mo</strong> at $5K total, <strong>$2,500/mo</strong> at $10K. Branded search volume is finite — you can't spend more than what people search.</li>
+              <li><strong>Click volume cap: 1,000–2,200 clicks/mo</strong> (historical was 667/mo). Volume grows ~2-3× from expanded retail footprint, but is still finite. Unspent branded budget auto-rolls to Shopping.</li>
             </ul>
-            <p style="margin:0;color:var(--muted);">Historical performance: $6,712 total spend, 12,000 clicks, 1,050 conversions, 8.75% CVR, $0.56 CPC — on an unoptimized store. The improved store and expanded retail footprint should sustain or exceed these metrics.</p>
+            <p style="margin:0;color:var(--muted);">Historical performance: $6,712 total spend, 12,000 clicks, 1,050 conversions, 8.75% CVR, $0.56 CPC — on an unoptimized store. The improved store and expanded retail footprint should sustain or exceed these metrics. Volume cap ensures the model doesn't assume more brand searches than realistically occur.</p>
           </div>
         </div>
       </div>

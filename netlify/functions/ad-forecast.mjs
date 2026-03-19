@@ -67,12 +67,16 @@ const BASELINE = {
   winbackAov: 47.00,
   winbackUnitsPerOrder: 1.70,
 
-  // Subscription renewal AOV — subscribe & save with 10% discount.
+  // Subscription renewal AOV — subscribe & save (10% discount already baked in).
   // Blended across all channels: Shopping $35, Branded $39, Email $40, Winback $42.
   // Weighted by volume (Shopping + Branded dominate): ~$38.
   subscriptionRenewalAov: 38.00,
   subscriptionRenewalUnitsPerOrder: 1.40,
-  blendedGmPct: 0.385,         // 38.5% blended gross margin
+  // Blended GM% across product mix, including shipping costs/revenue.
+  // Weighted by Shopping mix (65% 1-bot 43.6%, 10% 3pk 49.5%, 10% bundle 52.1%,
+  //   5% 5pk 57.4%, 5% CYO-5 59.6%, 5% other ~41%) = 46.4%.
+  // After Shopify payment processing (~3%): ~43%. Using 45% as product-level GM.
+  blendedGmPct: 0.45,
   monthlyOrganicUnits: 134,    // 79 orders × 1.7 units/order
 
   // Customer data
@@ -133,10 +137,16 @@ const ASSUMPTIONS = {
   // Accounts for: page speed, CRO PDPs, subscription, free ship threshold, 6K+ TJX retail stores
   storeUplift: { conservative: 1.45, base: 1.575, aggressive: 1.70 },
 
-  // Campaign ramp + seasonality factors by month (Apr 2026 – Mar 2027).
-  // Combines Google PMax learning phase ramp (months 1-3) with supplement demand seasonality.
-  //              Apr   May   Jun   Jul   Aug   Sep   Oct   Nov   Dec   Jan   Feb   Mar
-  rampFactors: [0.55, 0.65, 0.85, 0.90, 0.82, 1.05, 1.10, 1.20, 0.92, 1.35, 1.08, 1.00],
+  // ── Learning phase ramp (months 1-3 only) ────────────────────────────────
+  // Google PMax / Shopping campaigns need 2-3 months to exit learning phase.
+  // During learning, the algorithm serves to suboptimal audiences → lower quality clicks.
+  //                Apr   May   Jun   Jul–Mar (fully ramped)
+  learningRamp:   [0.55, 0.72, 0.90, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00],
+
+  // ── Demand seasonality (independent of campaign maturity) ────────────────
+  // Supplement DTC demand patterns by month.
+  //                   Apr  May  Jun  Jul  Aug  Sep  Oct  Nov  Dec  Jan  Feb  Mar
+  demandSeasonality: [1.00, 0.90, 0.94, 0.90, 0.82, 1.05, 1.10, 1.20, 0.92, 1.35, 1.08, 1.00],
   // Jul/Aug: summer slump. Sep-Oct: back-to-wellness. Nov: BFCM boost.
   // Dec: post-BFCM hangover. Jan: New Year resolution peak. Feb: resolution tail.
 
@@ -157,8 +167,14 @@ const ASSUMPTIONS = {
   // Source: Klaviyo, Omnisend industry benchmarks
   cartRecoveryRate: { conservative: 0.05, base: 0.10, aggressive: 0.15 },
 
-  // % of ad sessions that abandon cart (don't convert)
-  cartAbandonRate: 0.70,
+  // Add-to-cart rate — % of non-converting visitors who add a product to cart.
+  // Industry average for Shopping PDP traffic: 8-15%. BHBY actual: 385 carts / ~2600 sessions = 14.8%.
+  // Cold Shopping skews lower, branded/warm skews higher. Blended ~12%.
+  addToCartRate: { conservative: 0.08, base: 0.12, aggressive: 0.18 },
+
+  // Of cart starters, % who abandon (Baymard Institute: 69.99%, rounded to 70%).
+  // This is the standard "cart abandonment rate" — NOT applied to all visitors.
+  cartAbandonPct: 0.70,
 
   // Win-back reactivation rate — % of lapsed customers reactivated over 12 months
   // Source: Retention.com, Klaviyo lapsed customer benchmarks
@@ -183,6 +199,11 @@ const ASSUMPTIONS = {
     10000: 2500,  // $2,500/mo branded + $7,500/mo Shopping
   },
 
+  // Branded search click volume cap — brand query volume is finite.
+  // Historical: 667 clicks/mo (2021-2022). With 6K+ TJX stores, volume should grow ~2-3×.
+  // Unspent branded budget auto-rolls to Shopping.
+  brandedClickCap: { conservative: 1000, base: 1500, aggressive: 2200 },
+
   // ── Subscription (subscribe & save) ──────────────────────────────────────
   // % of new purchasers who opt into subscribe & save.
   // Source: ReCharge, Bold Commerce — supplement brands see 15-30% adoption
@@ -194,9 +215,6 @@ const ASSUMPTIONS = {
 
   // Days supply per bottle = 60 days → renewal every 2 months.
   subscriptionIntervalMonths: 2,
-
-  // Subscribe & save discount (10% off).
-  subscriptionDiscount: 0.10,
 
   // Budget-dependent efficiency penalties — diminishing returns at higher spend.
   // At $10K/mo you exhaust cheap inventory and bid into more competitive auctions.
@@ -238,8 +256,7 @@ function runMonteCarlo(budgetPerMonth, A, iterations = 10000) {
   const annualRevenues = [];
   const annualUnits = [];
   const eff = A.budgetEfficiency?.[budgetPerMonth] ?? { cpcMultiplier: 1, cvrMultiplier: 1 };
-  const brandedBudget  = A.brandedBudgetAllocation?.[budgetPerMonth] ?? 0;
-  const shoppingBudget = budgetPerMonth - brandedBudget;
+  const nominalBrandedBudget = A.brandedBudgetAllocation?.[budgetPerMonth] ?? 0;
 
   for (let i = 0; i < iterations; i++) {
     // Shopping params (cold traffic — efficiency penalties apply)
@@ -250,11 +267,13 @@ function runMonteCarlo(budgetPerMonth, A, iterations = 10000) {
     // Branded search params (warm traffic — no efficiency penalty, volume-capped instead)
     const bCpc        = triangularSample(A.brandedCpc.aggressive, A.brandedCpc.base, A.brandedCpc.conservative);
     const bCvr        = triangularSample(A.brandedCvr.conservative, A.brandedCvr.base, A.brandedCvr.aggressive);
+    const bClickCap   = triangularSample(A.brandedClickCap.conservative, A.brandedClickCap.base, A.brandedClickCap.aggressive);
 
     // Email / cart / win-back
     const emailCapt   = triangularSample(A.emailCaptureRate.conservative, A.emailCaptureRate.base, A.emailCaptureRate.aggressive);
     const welcomeCvr  = triangularSample(A.welcomeCvr.conservative, A.welcomeCvr.base, A.welcomeCvr.aggressive);
     const cartRecovery= triangularSample(A.cartRecoveryRate.conservative, A.cartRecoveryRate.base, A.cartRecoveryRate.aggressive);
+    const atcRate     = triangularSample(A.addToCartRate.conservative, A.addToCartRate.base, A.addToCartRate.aggressive);
     const winback     = triangularSample(A.winbackRate.conservative, A.winbackRate.base, A.winbackRate.aggressive);
 
     // Subscription
@@ -265,34 +284,39 @@ function runMonteCarlo(budgetPerMonth, A, iterations = 10000) {
     const monthlySubs = [];
 
     for (let m = 0; m < 12; m++) {
-      const ramp        = A.rampFactors[m];
+      const ramp        = A.learningRamp[m] * A.demandSeasonality[m];
       const cpcSeason   = A.cpcSeasonality?.[m] ?? 1.0;
 
-      // Channel A: Google Shopping (non-branded, cold traffic)
+      // Channel F: Branded Search — cap clicks by query volume, roll unspent to Shopping
+      const brandedSeasonalCpc  = bCpc * cpcSeason;
+      const rawBrandedClicks    = nominalBrandedBudget / brandedSeasonalCpc;
+      const brandedClicks       = Math.min(rawBrandedClicks, bClickCap);
+      const actualBrandedSpend  = brandedClicks * brandedSeasonalCpc;
+      const brandedConversions  = brandedClicks * bCvr * ramp;
+      const brandedRev          = brandedConversions * BASELINE.brandedSearchAov;
+
+      // Channel A: Google Shopping — gets base budget + any unspent branded
+      const effectiveShoppingBudget = (budgetPerMonth - nominalBrandedBudget) + (nominalBrandedBudget - actualBrandedSpend);
       const seasonalCpc         = cpc * cpcSeason;
-      const shoppingClicks      = shoppingBudget / seasonalCpc;
+      const shoppingClicks      = effectiveShoppingBudget / seasonalCpc;
       const effectiveCvr        = cvr * uplift;
       const shoppingConversions = shoppingClicks * effectiveCvr * ramp;
       const shoppingRev         = shoppingConversions * BASELINE.shoppingAov;
-
-      // Channel F: Branded Search (warm traffic — own CPC/CVR, no uplift multiplier)
-      const brandedSeasonalCpc  = bCpc * cpcSeason;
-      const brandedClicks       = brandedBudget / brandedSeasonalCpc;
-      const brandedConversions  = brandedClicks * bCvr * ramp;
-      const brandedRev          = brandedConversions * BASELINE.brandedSearchAov;
 
       // Non-converters from both channels feed into email/cart funnels
       const shoppingNonConvert  = shoppingClicks * Math.max(0, 1 - effectiveCvr) * ramp;
       const brandedNonConvert   = brandedClicks  * Math.max(0, 1 - bCvr) * ramp;
       const totalNonConvert     = shoppingNonConvert + brandedNonConvert;
 
-      // Channel B: Welcome series (email subscribers who didn't convert)
-      const newEmailSubs       = totalNonConvert * emailCapt;
+      // Channel B: Welcome series — deduct overlap with cart flow (Klaviyo suppresses welcome
+      // for contacts who also have an active cart abandonment flow)
+      const newEmailSubs       = totalNonConvert * emailCapt * (1 - atcRate);
       const welcomeConversions = newEmailSubs * welcomeCvr;
       const welcomeRev         = welcomeConversions * BASELINE.emailFlowAov;
 
       // Channel C: Ad-driven cart abandonment recovery
-      const adAbandonedCarts   = totalNonConvert * A.cartAbandonRate;
+      // Funnel: non-converters → add to cart (atcRate) → abandon (70% Baymard) → recover
+      const adAbandonedCarts   = totalNonConvert * atcRate * A.cartAbandonPct;
       const cartConversions    = adAbandonedCarts * cartRecovery;
       const cartRev            = cartConversions * BASELINE.emailFlowAov;
 
@@ -304,8 +328,10 @@ function runMonteCarlo(budgetPerMonth, A, iterations = 10000) {
       const winbackRev = winbackConversions * BASELINE.winbackAov;
 
       // Channel E: Organic abandoned cart recovery
-      const organicCartConversions = BASELINE.abandonedCartsPerMonth * cartRecovery;
-      const organicCartRev         = organicCartConversions * BASELINE.emailFlowAov;
+      // Small ramp for Klaviyo flow optimization: 70% month 1, 90% month 2, 100% month 3+
+      const organicFlowRamp          = m === 0 ? 0.70 : m === 1 ? 0.90 : 1.0;
+      const organicCartConversions   = BASELINE.abandonedCartsPerMonth * cartRecovery * organicFlowRamp;
+      const organicCartRev           = organicCartConversions * BASELINE.emailFlowAov;
 
       // Channel G: Subscription renewals from past cohorts
       const monthConversions = shoppingConversions + brandedConversions + welcomeConversions
@@ -365,53 +391,58 @@ function forecastScenario(budgetPerMonth, tier, A) {
   const uplift       = A.storeUplift[tier];
   const bCpc         = A.brandedCpc[tier];
   const bCvr         = A.brandedCvr[tier];
+  const bClickCap    = A.brandedClickCap[tier];
   const emailCapture = A.emailCaptureRate[tier];
   const welcomeCvr   = A.welcomeCvr[tier];
   const cartRecovery = A.cartRecoveryRate[tier];
+  const atcRate      = A.addToCartRate[tier];
   const winbackRt    = A.winbackRate[tier];
   const subAdopt     = A.subscriptionAdoptionRate[tier];
 
-  const brandedBudget  = A.brandedBudgetAllocation?.[budgetPerMonth] ?? 0;
-  const shoppingBudget = budgetPerMonth - brandedBudget;
+  const nominalBrandedBudget = A.brandedBudgetAllocation?.[budgetPerMonth] ?? 0;
   const addressableLapsed = BASELINE.lapsedOneTime + BASELINE.lapsedReturning;
   const monthly = [];
   const monthlySubs = [];
 
   for (let m = 0; m < 12; m++) {
-    const ramp      = A.rampFactors[m];
+    const ramp      = A.learningRamp[m] * A.demandSeasonality[m];
     const cpcSeason = A.cpcSeasonality?.[m] ?? 1.0;
 
-    // Channel A: Google Shopping (non-branded, cold traffic)
+    // Channel F: Branded Search — cap clicks by query volume, roll unspent to Shopping
+    const brandedSeasonalCpc  = bCpc * cpcSeason;
+    const rawBrandedClicks    = nominalBrandedBudget / brandedSeasonalCpc;
+    const brandedClicks       = Math.min(rawBrandedClicks, bClickCap);
+    const actualBrandedSpend  = brandedClicks * brandedSeasonalCpc;
+    const brandedConversions  = brandedClicks * bCvr * ramp;
+    const brandedOrders       = Math.round(brandedConversions);
+    const brandedRev          = brandedConversions * BASELINE.brandedSearchAov;
+    const brandedUnits        = brandedConversions * BASELINE.brandedSearchUnitsPerOrder;
+
+    // Channel A: Google Shopping — gets base budget + any unspent branded
+    const effectiveShoppingBudget = (budgetPerMonth - nominalBrandedBudget) + (nominalBrandedBudget - actualBrandedSpend);
     const seasonalCpc         = cpc * cpcSeason;
-    const shoppingClicks      = shoppingBudget / seasonalCpc;
+    const shoppingClicks      = effectiveShoppingBudget / seasonalCpc;
     const effectiveCvr        = cvr * uplift;
     const shoppingConversions = shoppingClicks * effectiveCvr * ramp;
     const shoppingOrders      = Math.round(shoppingConversions);
     const shoppingRev         = shoppingConversions * BASELINE.shoppingAov;
     const shoppingUnits       = shoppingConversions * BASELINE.shoppingUnitsPerOrder;
 
-    // Channel F: Branded Search (warm traffic — own CPC/CVR, no uplift)
-    const brandedSeasonalCpc  = bCpc * cpcSeason;
-    const brandedClicks       = brandedBudget / brandedSeasonalCpc;
-    const brandedConversions  = brandedClicks * bCvr * ramp;
-    const brandedOrders       = Math.round(brandedConversions);
-    const brandedRev          = brandedConversions * BASELINE.brandedSearchAov;
-    const brandedUnits        = brandedConversions * BASELINE.brandedSearchUnitsPerOrder;
-
     // Non-converters from both channels feed email/cart funnels
     const shoppingNonConvert  = shoppingClicks * Math.max(0, 1 - effectiveCvr) * ramp;
     const brandedNonConvert   = brandedClicks  * Math.max(0, 1 - bCvr) * ramp;
     const totalNonConvert     = shoppingNonConvert + brandedNonConvert;
 
-    // Channel B: Welcome series (email subscribers who didn't convert)
-    const newEmailSubs       = totalNonConvert * emailCapture;
+    // Channel B: Welcome series — deduct overlap with cart flow
+    const newEmailSubs       = totalNonConvert * emailCapture * (1 - atcRate);
     const welcomeConversions = newEmailSubs * welcomeCvr;
     const welcomeOrders      = Math.round(welcomeConversions);
     const welcomeRev         = welcomeConversions * BASELINE.emailFlowAov;
     const welcomeUnits       = welcomeConversions * BASELINE.emailFlowUnitsPerOrder;
 
     // Channel C: Ad-driven cart abandonment recovery
-    const adAbandonedCarts = totalNonConvert * A.cartAbandonRate;
+    // Funnel: non-converters → add to cart (atcRate) → abandon (70% Baymard) → recover
+    const adAbandonedCarts = totalNonConvert * atcRate * A.cartAbandonPct;
     const cartConversions  = adAbandonedCarts * cartRecovery;
     const cartOrders       = Math.round(cartConversions);
     const cartRev          = cartConversions * BASELINE.emailFlowAov;
@@ -426,10 +457,11 @@ function forecastScenario(budgetPerMonth, tier, A) {
     const winbackUnits  = winbackConversions * BASELINE.winbackUnitsPerOrder;
 
     // Channel E: Organic abandoned cart recovery
-    const organicCartConversions = BASELINE.abandonedCartsPerMonth * cartRecovery;
-    const organicCartOrders      = Math.round(organicCartConversions);
-    const organicCartRev         = organicCartConversions * BASELINE.emailFlowAov;
-    const organicCartUnits       = organicCartConversions * BASELINE.emailFlowUnitsPerOrder;
+    const organicFlowRamp          = m === 0 ? 0.70 : m === 1 ? 0.90 : 1.0;
+    const organicCartConversions   = BASELINE.abandonedCartsPerMonth * cartRecovery * organicFlowRamp;
+    const organicCartOrders        = Math.round(organicCartConversions);
+    const organicCartRev           = organicCartConversions * BASELINE.emailFlowAov;
+    const organicCartUnits         = organicCartConversions * BASELINE.emailFlowUnitsPerOrder;
 
     // Channel G: Subscription renewals from past cohorts
     const monthConversions = shoppingConversions + brandedConversions + welcomeConversions
@@ -568,18 +600,20 @@ export default async function handler(req) {
       brandedCpc:       { ...ASSUMPTIONS.brandedCpc },
       brandedCvr:       { ...ASSUMPTIONS.brandedCvr },
       brandedBudgetAllocation: ASSUMPTIONS.brandedBudgetAllocation,  // read-only
+      brandedClickCap:  { ...ASSUMPTIONS.brandedClickCap },
       emailCaptureRate: { ...ASSUMPTIONS.emailCaptureRate },
       welcomeCvr:       { ...ASSUMPTIONS.welcomeCvr },
       cartRecoveryRate: { ...ASSUMPTIONS.cartRecoveryRate },
+      addToCartRate:    { ...ASSUMPTIONS.addToCartRate },
+      cartAbandonPct:   ASSUMPTIONS.cartAbandonPct,
       winbackRate:      { ...ASSUMPTIONS.winbackRate },
       subscriptionAdoptionRate: { ...ASSUMPTIONS.subscriptionAdoptionRate },
       subscriptionRetentionRate: ASSUMPTIONS.subscriptionRetentionRate,
       subscriptionIntervalMonths: ASSUMPTIONS.subscriptionIntervalMonths,
-      subscriptionDiscount: ASSUMPTIONS.subscriptionDiscount,
-      rampFactors:       ASSUMPTIONS.rampFactors,       // read-only, safe to share
-      cpcSeasonality:    ASSUMPTIONS.cpcSeasonality,   // read-only, safe to share
-      budgetEfficiency:  ASSUMPTIONS.budgetEfficiency,  // read-only, safe to share
-      cartAbandonRate:   ASSUMPTIONS.cartAbandonRate,
+      learningRamp:      ASSUMPTIONS.learningRamp,       // read-only, safe to share
+      demandSeasonality: ASSUMPTIONS.demandSeasonality,  // read-only, safe to share
+      cpcSeasonality:    ASSUMPTIONS.cpcSeasonality,     // read-only, safe to share
+      budgetEfficiency:  ASSUMPTIONS.budgetEfficiency,    // read-only, safe to share
       safetyStockMultiplier:        ASSUMPTIONS.safetyStockMultiplier,
       leadTimeWeeks:                ASSUMPTIONS.leadTimeWeeks,
       recommendedOrderLeadWeeks:    ASSUMPTIONS.recommendedOrderLeadWeeks,
@@ -687,9 +721,12 @@ export default async function handler(req) {
         brandedCpc: A.brandedCpc,
         brandedCvr: A.brandedCvr,
         brandedBudgetAllocation: A.brandedBudgetAllocation,
+        brandedClickCap: A.brandedClickCap,
         emailCaptureRate: A.emailCaptureRate,
         welcomeCvr: A.welcomeCvr,
         cartRecoveryRate: A.cartRecoveryRate,
+        addToCartRate: A.addToCartRate,
+        cartAbandonPct: A.cartAbandonPct,
         winbackRate: A.winbackRate,
         subscriptionAdoptionRate: A.subscriptionAdoptionRate,
         subscriptionRetentionRate: A.subscriptionRetentionRate,
@@ -715,7 +752,9 @@ export default async function handler(req) {
           totalConversions: 1050,
           campaignType: "BRANDED_SEARCH — modeled as separate channel (F) with own CPC/CVR",
         },
-        brandedSearchNote: "Branded search is modeled as a separate channel with its own CPC ($0.50-$0.90) and CVR (5-10%) based on historical performance on the unoptimized store ($0.56 CPC, 8.75% CVR in 2021-2022) adjusted for 2026. Budget allocation is capped by estimated brand search volume.",
+        brandedSearchNote: "Branded search is modeled as a separate channel with its own CPC ($0.50-$0.90) and CVR (5-10%) based on historical performance on the unoptimized store ($0.56 CPC, 8.75% CVR in 2021-2022) adjusted for 2026. Click volume is capped at 1,000-2,200 clicks/month (historical 667/mo × 1.5-3.3× for retail expansion). Unspent branded budget auto-rolls to Shopping.",
+        cartRecoveryNote: "Cart recovery uses a 3-step funnel: (1) non-converters → add to cart (8-18%, base 12%), (2) cart starters → abandon (70% Baymard standard), (3) abandoners → email recovery (5-15%). Welcome series deducts the cart overlap since Klaviyo suppresses welcome emails for contacts in the cart abandonment flow.",
+        gmNote: "Blended gross margin of 45% is product-level GM after COGS and shipping costs, weighted by the ad-driven product mix. Before payment processing fees (~3%). Verified against pricing spreadsheet (individual SKU GM% ranges from 43.6% for 1-bottle to 59.6% for CYO-5).",
         subscriptionNote: "Subscription renewals are modeled using cohort-based LTV: each month's new subscribers (18% adoption rate) generate renewals every 2 months with 75% retention per cycle (avg lifetime ~8 months). Only renewals within the 12-month forecast horizon are counted.",
         storeImprovementsNote: "CVR uplifts are cumulative since 2022 campaigns. Store is now CRO-optimized on Botanical OS 2.0 with subscription, lower free ship threshold, and better PDPs.",
         retailHaloNote: "6,000+ TJX retail stores (TJ Maxx, Marshalls, HomeGoods, Sierra) create brand recognition that increases online CVR for shoppers who've seen the product in-store.",
