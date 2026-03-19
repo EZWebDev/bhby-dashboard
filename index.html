@@ -615,7 +615,7 @@
     </div>
     <div class="chart-card">
       <div class="chart-title">Revenue by Channel — Monthly Breakdown</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:12px;">Shopping / Welcome Series / Cart Recovery / Win-back / Organic Cart Recovery (base scenario)</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px;">Shopping / Branded Search / Welcome Series / Cart Recovery / Win-back / Organic Cart / Subscription Renewals (base)</div>
       <div style="position:relative;height:300px;">
         <canvas id="chartChannelBreakdown"></canvas>
       </div>
@@ -758,6 +758,17 @@
 
         <div>
           <label style="font-family:'DM Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);display:block;margin-bottom:6px;">
+            Subscription Adoption: <strong id="slider-sub-val" style="color:var(--text);">18%</strong>
+          </label>
+          <input type="range" id="slider-sub" min="5" max="40" step="1" value="18"
+            style="width:100%;" oninput="updateSlider('sub', this.value); recomputeForecast()">
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;">
+            <span>5%</span><span>40%</span>
+          </div>
+        </div>
+
+        <div>
+          <label style="font-family:'DM Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);display:block;margin-bottom:6px;">
             Safety Stock Multiplier: <strong id="slider-safety-val" style="color:var(--text);">1.25×</strong>
           </label>
           <input type="range" id="slider-safety" min="1.0" max="2.0" step="0.05" value="1.25"
@@ -769,7 +780,7 @@
 
       </div>
       <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:11px;color:var(--muted);">Fixed inputs: AOV by channel — Shopping $41 · Email flows $44 · Win-back $47 · Organic baseline $49.82 · Blended GM 38.5% · Store uplift 1.575×</span>
+        <span style="font-size:11px;color:var(--muted);">Fixed: AOV — Shopping $39 · Branded $43 · Email $44 · Win-back $47 · Sub renewal $38 · GM 38.5% · Store uplift 1.575× · Sub retention 75%/cycle · 2-mo interval</span>
         <button onclick="resetSliders()" style="padding:6px 14px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-family:'DM Mono',monospace;font-size:11px;cursor:pointer;color:var(--text);">Reset to defaults</button>
       </div>
     </div>
@@ -790,8 +801,10 @@
       <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:16px;margin-top:16px;margin-bottom:20px;">
         <div class="font-mono" style="font-size:11px;color:#0369a1;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">Executive Summary</div>
         <p style="font-size:13px;color:var(--text);margin:0;line-height:1.7;">
-          This forecast uses a <strong>blended multi-channel model</strong> combining bottom-up Google Shopping projections
-          with Klaviyo email flow modeling. All assumptions are grounded in (1) BHBY's actual historical Google Ads data,
+          This forecast uses a <strong>blended 7-channel model</strong> combining bottom-up Google Shopping projections,
+          a dedicated <strong>branded search channel</strong> (leveraging historical campaign success and TJX retail halo),
+          Klaviyo email flow modeling, and <strong>subscription renewal LTV</strong> (cohort-based, 2-month interval with 75% retention).
+          All assumptions are grounded in (1) BHBY's actual historical Google Ads data,
           (2) current Shopify store performance, and (3) published industry benchmarks for supplement DTC brands.
           Projections include conservative, base, and aggressive scenarios with Monte Carlo confidence intervals from
           10,000 iterations. These numbers reflect incremental DTC/Shopify revenue only — retail (TJX) channel is forecasted separately.
@@ -912,6 +925,10 @@
               <tr><td>Klaviyo cart abandonment recovery</td><td class="font-mono">5–15%</td><td style="color:var(--muted);">Klaviyo, Omnisend industry benchmarks</td></tr>
               <tr><td>Win-back reactivation rate</td><td class="font-mono">2–5%</td><td style="color:var(--muted);">Retention.com, Klaviyo lapsed customer data</td></tr>
               <tr><td>Email capture rate from paid traffic</td><td class="font-mono">10–20%</td><td style="color:var(--muted);">Klaviyo, Postscript DTC benchmarks</td></tr>
+              <tr><td>Branded search CPC — supplement brand terms</td><td class="font-mono">$0.40–$1.00</td><td style="color:var(--muted);">BHBY historical ($0.56), WordStream branded benchmarks</td></tr>
+              <tr><td>Branded search CVR — warm traffic</td><td class="font-mono">5–12%</td><td style="color:var(--muted);">BHBY historical (8.75% unoptimized), Google Ads industry data</td></tr>
+              <tr><td>Subscribe & save adoption rate — supplement DTC</td><td class="font-mono">15–30%</td><td style="color:var(--muted);">ReCharge, Bold Commerce supplement vertical reports</td></tr>
+              <tr><td>Subscription retention rate per cycle</td><td class="font-mono">65–80%</td><td style="color:var(--muted);">ReCharge churn benchmarks, supplement category data</td></tr>
             </tbody>
           </table>
         </div>
@@ -941,7 +958,51 @@
         </div>
       </div>
 
-      <!-- 6g: What This Forecast Does NOT Include -->
+      <!-- 6g: Branded Search Channel -->
+      <div style="margin-bottom:18px;">
+        <div style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:8px 0;" onclick="toggleSection('branded-ch-body','branded-ch-arrow')">
+          <span id="branded-ch-arrow" style="color:var(--muted);font-size:14px;">▶</span>
+          <div class="font-mono" style="font-size:12px;font-weight:500;letter-spacing:0.06em;color:var(--text);">Channel F: Branded Search — Separate Model for Warm Traffic</div>
+        </div>
+        <div id="branded-ch-body" style="display:none;padding-left:20px;">
+          <div style="background:var(--bg);border-radius:6px;padding:14px;font-size:12px;line-height:1.8;color:var(--text);">
+            <p style="margin:0 0 10px;">Branded search (people searching "behappybeyou" or "be happy be you gummies") is modeled as a <strong>separate channel</strong> with its own CPC, CVR, and AOV — distinct from Google Shopping:</p>
+            <ul style="padding-left:16px;margin:0 0 10px;">
+              <li><strong>CPC: $0.50–$0.90</strong> vs Shopping $0.80–$1.80. Historical branded CPC was $0.56 in 2021-2022; adjusted for 2026 inflation.</li>
+              <li><strong>CVR: 5–10%</strong> (no store uplift applied — branded buyers are already warm). Historical CVR was 8.75% on the unoptimized store.</li>
+              <li><strong>AOV: $43</strong> vs Shopping $39. Brand-familiar buyers have higher multi-pack/bundle attach rates from TJX exposure.</li>
+              <li><strong>Budget allocation: $1,750/mo</strong> at $5K total, <strong>$2,500/mo</strong> at $10K. Branded search volume is finite — you can't spend more than what people search.</li>
+            </ul>
+            <p style="margin:0;color:var(--muted);">Historical performance: $6,712 total spend, 12,000 clicks, 1,050 conversions, 8.75% CVR, $0.56 CPC — on an unoptimized store. The improved store and expanded retail footprint should sustain or exceed these metrics.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 6h: Subscription LTV -->
+      <div style="margin-bottom:18px;">
+        <div style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:8px 0;" onclick="toggleSection('sub-body','sub-arrow')">
+          <span id="sub-arrow" style="color:var(--muted);font-size:14px;">▶</span>
+          <div class="font-mono" style="font-size:12px;font-weight:500;letter-spacing:0.06em;color:var(--text);">Channel G: Subscription Renewals — Cohort-Based LTV Model</div>
+        </div>
+        <div id="sub-body" style="display:none;padding-left:20px;">
+          <div style="background:var(--bg);border-radius:6px;padding:14px;font-size:12px;line-height:1.8;color:var(--text);">
+            <p style="margin:0 0 10px;">Subscription revenue is modeled using a <strong>cohort tracking system</strong> — each month's new subscribers generate recurring revenue in future months:</p>
+            <ul style="padding-left:16px;margin:0 0 10px;">
+              <li><strong>Adoption rate: 12–25%</strong> (base 18%) of new purchasers opt for subscribe & save. Source: ReCharge/Bold Commerce — supplement brands see 15-30% with good S&S UX.</li>
+              <li><strong>Renewal interval: 2 months</strong> (60-day supply per bottle). Subscriber renews automatically every 60 days.</li>
+              <li><strong>Retention: 75% per cycle</strong>. Of subscribers entering cycle N, 75% renew. This gives ~3 expected renewals over lifetime (avg 8 months).</li>
+              <li><strong>Renewal AOV: $38</strong> (10% subscribe & save discount off blended initial AOV).</li>
+              <li><strong>Snowball effect:</strong> Early months' subscribers keep generating renewals — by month 6-7, subscription renewals become a meaningful revenue layer.</li>
+            </ul>
+            <div style="margin:8px 0;padding:8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:4px;">
+              <strong>Example:</strong> 100 subscribers acquired in Month 1 → 75 renew in Month 3 ($2,850) → 56 in Month 5 ($2,138) → 42 in Month 7 ($1,603)… Only renewals within the 12-month horizon are counted.
+            </div>
+            <p style="margin:0;color:var(--muted);">Subscription renewals are NOT double-counted with the initial purchase — only renewal orders (month 3+) from each cohort are included in Channel G. Units from renewals are included in inventory forecasting.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 6i: What This Forecast Does NOT Include -->
       <div style="margin-bottom:8px;">
         <div style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:8px 0;" onclick="toggleSection('exclusions-body','exclusions-arrow')">
           <span id="exclusions-arrow" style="color:var(--muted);font-size:14px;">▶</span>
@@ -954,8 +1015,8 @@
             <li><strong>Returns and refunds</strong> (historically low for gummy vitamins)</li>
             <li><strong>Seasonal spikes</strong> — Black Friday, holiday gifting, New Year wellness surge</li>
             <li><strong>Price changes</strong> or new product launches</li>
-            <li><strong>Meta / Facebook Ads or TikTok Ads</strong> — only Google Shopping + Klaviyo modeled here</li>
-            <li><strong>Subscription renewal revenue</strong> from existing subscribers acquired before launch</li>
+            <li><strong>Meta / Facebook Ads or TikTok Ads</strong> — only Google Shopping + Branded Search + Klaviyo modeled here</li>
+            <li><strong>Subscription renewals from pre-launch subscribers</strong> — only new subscribers acquired through the ad campaigns are tracked</li>
           </ul>
           <p style="font-size:11px;color:var(--muted);margin-top:8px;">All of the above represent additional upside not captured in this model. The forecast is intentionally conservative on what it includes.</p>
         </div>
@@ -1626,13 +1687,14 @@ function updateSlider(type, value) {
     email:  () => { document.getElementById("slider-email-val").textContent = v + "%"; },
     cart:   () => { document.getElementById("slider-cart-val").textContent = v + "%"; },
     winback:() => { document.getElementById("slider-winback-val").textContent = v + "%"; },
+    sub:    () => { document.getElementById("slider-sub-val").textContent = v + "%"; },
     safety: () => { document.getElementById("slider-safety-val").textContent = v.toFixed(2) + "×"; },
   };
   if (labels[type]) labels[type]();
 }
 
 function resetSliders() {
-  const defaults = { cpc: 1.20, cvr: 2.5, email: 15, cart: 10, winback: 3.5, safety: 1.25 };
+  const defaults = { cpc: 1.20, cvr: 2.5, email: 15, cart: 10, winback: 3.5, sub: 18, safety: 1.25 };
   Object.entries(defaults).forEach(([k, v]) => {
     const el = document.getElementById("slider-" + k);
     if (el) { el.value = v; updateSlider(k, v); }
@@ -1660,6 +1722,7 @@ async function loadForecast(isRecompute = false) {
       emailCapture: document.getElementById("slider-email").value,
       cartRecovery: document.getElementById("slider-cart").value,
       winbackRate:  document.getElementById("slider-winback").value,
+      subAdoption:  document.getElementById("slider-sub").value,
       safetyStock:  document.getElementById("slider-safety").value,
     });
 
@@ -1812,6 +1875,13 @@ function renderChannelChart(s) {
           stack: "channels",
         },
         {
+          label: "Branded Search",
+          data: s.base.monthly.map(m => m.byChannel.brandedSearch?.revenue ?? 0),
+          backgroundColor: "#60a5fa",
+          borderRadius: 3,
+          stack: "channels",
+        },
+        {
           label: "Welcome Series",
           data: s.base.monthly.map(m => m.byChannel.welcomeSeries.revenue),
           backgroundColor: "#0d9488",
@@ -1836,6 +1906,13 @@ function renderChannelChart(s) {
           label: "Organic Cart Recovery",
           data: s.base.monthly.map(m => m.byChannel.organicCartRecov?.revenue ?? 0),
           backgroundColor: "#16a34a",
+          borderRadius: 3,
+          stack: "channels",
+        },
+        {
+          label: "Subscription Renewals",
+          data: s.base.monthly.map(m => m.byChannel.subscriptionRenewals?.revenue ?? 0),
+          backgroundColor: "#db2777",
           borderRadius: 3,
           stack: "channels",
         },

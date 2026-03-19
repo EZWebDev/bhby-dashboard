@@ -5,10 +5,13 @@
  * Klaviyo email flow campaigns launching April 2026.
  *
  * Channels modeled:
- *   A. Google Shopping (bottom-up CPC/CVR)
+ *   A. Google Shopping (non-branded, bottom-up CPC/CVR)
  *   B. Welcome Series (Klaviyo — new ad-driven subscribers)
  *   C. Cart Abandonment Recovery (Klaviyo)
  *   D. Win-Back Campaigns (Klaviyo — lapsed customer DB)
+ *   E. Organic Abandoned Cart Recovery (Klaviyo)
+ *   F. Branded Search (warm traffic — own CPC/CVR)
+ *   G. Subscription Renewals (subscribe & save — cohort-based LTV)
  *
  * Returns projections for $5K/mo and $10K/mo budget scenarios, each with
  * conservative / base / aggressive estimates and Monte Carlo P10/P50/P90
@@ -34,23 +37,26 @@ const BASELINE = {
   aov: 49.82,                  // blended organic AOV (existing customers, returning + direct)
   unitsPerOrder: 1.7,          // blended organic units/order
 
-  // Ad-driven AOV — blended branded search + non-branded Shopping.
-  // PRIMARY CAMPAIGN: branded search (warm — searched "behappybeyou", 6K+ TJX retail halo).
-  // PDP 3-offer anchoring: 1 / 3 / 5 tiers. 2-pack and 4-pack removed (92% rev was 1/3/5).
-  // LIVE AT LAUNCH: Glow & Restore ($57.99), Performance Stack ($57.99),
-  //   CYO 3-pack ($57.99 draft → going live). CYO 5-pack ($94.99) coming later.
-  //
   // VERIFIED PRICES (Shopify API 2026-03-18):
   //   1-bottle $19.99 + $5.99 ship = $25.98 | 3-pack $54.99 | 5-pack $89.99
   //   Bundle/CYO-3 $57.99 | CYO-5 $94.99 (planned)
-  //
+  // PDP 3-offer anchoring: 1 / 3 / 5 tiers. 2-pack and 4-pack removed (92% rev was 1/3/5).
+  // LIVE AT LAUNCH: Glow & Restore ($57.99), Performance Stack ($57.99),
+  //   CYO 3-pack ($57.99 draft → going live). CYO 5-pack ($94.99) coming later.
+
+  // Google Shopping AOV — pure non-branded cold traffic (product searches).
+  // Non-branded (65% 1-bot $25.98, 10% 3pk $54.99, 10% bundle $57.99,
+  //   5% 5pk $89.99, 5% CYO-5 $94.99, 5% other $25) = $38.69
+  // Cold shoppers skew heavily to single-bottle trial.
+  shoppingAov: 39.00,
+  shoppingUnitsPerOrder: 1.35,
+
+  // Branded search AOV — warm traffic, searched "behappybeyou" / "be happy be you gummies".
+  // 6K+ TJX retail stores create brand familiarity → higher multi-pack/bundle rate.
   // Branded (50% 1-bot $25.98, 12% 3pk $54.99, 15% bundle $57.99,
   //   8% 5pk $89.99, 5% CYO-5 $94.99, 10% other $25) = $42.74
-  // Non-branded (65% 1-bot, 10% 3pk, 10% bundle, 5% 5pk, 5% CYO-5, 5% other) = $38.69
-  // Blended (60/40 branded/non-branded): $41.12
-  // Industry: single-product avg $35, bundle-focused avg $89 (Wavesy/MHI 2026).
-  adDrivenAov: 41.00,
-  adDrivenUnitsPerOrder: 1.50,
+  brandedSearchAov: 43.00,
+  brandedSearchUnitsPerOrder: 1.55,
 
   // Email-flow traffic (welcome series, cart recovery) — engaged visitors.
   // Klaviyo emails feature bundles with savings callouts → higher bundle attach.
@@ -58,9 +64,14 @@ const BASELINE = {
   emailFlowUnitsPerOrder: 1.60,
 
   // Win-back — lapsed customers, already purchased. Near-organic behavior.
-  // Bundles strong for re-engagement ("try something new").
   winbackAov: 47.00,
   winbackUnitsPerOrder: 1.70,
+
+  // Subscription renewal AOV — subscribe & save with 10% discount.
+  // Blended across all channels: Shopping $35, Branded $39, Email $40, Winback $42.
+  // Weighted by volume (Shopping + Branded dominate): ~$38.
+  subscriptionRenewalAov: 38.00,
+  subscriptionRenewalUnitsPerOrder: 1.40,
   blendedGmPct: 0.385,         // 38.5% blended gross margin
   monthlyOrganicUnits: 134,    // 79 orders × 1.7 units/order
 
@@ -153,8 +164,43 @@ const ASSUMPTIONS = {
   // Source: Retention.com, Klaviyo lapsed customer benchmarks
   winbackRate: { conservative: 0.02, base: 0.035, aggressive: 0.05 },
 
+  // ── Branded search (warm traffic) ──────────────────────────────────────────
+  // Bidding on "behappybeyou", "be happy be you gummies", etc.
+  // Much cheaper than Shopping — few competitors bid on your brand name.
+  // Historical CPC: $0.56 (2021-2022). Inflation adds ~15-20% by 2026.
+  brandedCpc: { conservative: 0.90, base: 0.65, aggressive: 0.50 },
+
+  // Branded CVR — warm traffic already knows the brand from TJX retail.
+  // Historical: 8.75% on unoptimized store. CRO improvements push this higher.
+  // Conservative accounts for informational brand queries that don't intend to buy.
+  // NO separate uplift multiplier — branded CVR already reflects the improved store.
+  brandedCvr: { conservative: 0.05, base: 0.07, aggressive: 0.10 },
+
+  // Monthly branded search budget — finite volume (limited by brand search queries).
+  // At higher total budgets, branded share decreases because volume caps out.
+  brandedBudgetAllocation: {
+    5000:  1750,  // $1,750/mo branded + $3,250/mo Shopping
+    10000: 2500,  // $2,500/mo branded + $7,500/mo Shopping
+  },
+
+  // ── Subscription (subscribe & save) ──────────────────────────────────────
+  // % of new purchasers who opt into subscribe & save.
+  // Source: ReCharge, Bold Commerce — supplement brands see 15-30% adoption
+  // with strong subscription UX. BHBY has ReCharge integrated.
+  subscriptionAdoptionRate: { conservative: 0.12, base: 0.18, aggressive: 0.25 },
+
+  // % of subscribers who renew each cycle. 75% → avg lifetime ~4 cycles (8 months).
+  subscriptionRetentionRate: 0.75,
+
+  // Days supply per bottle = 60 days → renewal every 2 months.
+  subscriptionIntervalMonths: 2,
+
+  // Subscribe & save discount (10% off).
+  subscriptionDiscount: 0.10,
+
   // Budget-dependent efficiency penalties — diminishing returns at higher spend.
   // At $10K/mo you exhaust cheap inventory and bid into more competitive auctions.
+  // Applied to Shopping only — branded search has its own volume cap.
   budgetEfficiency: {
     5000:  { cpcMultiplier: 1.00, cvrMultiplier: 1.00 },
     10000: { cpcMultiplier: 1.15, cvrMultiplier: 0.90 },
@@ -192,57 +238,99 @@ function runMonteCarlo(budgetPerMonth, A, iterations = 10000) {
   const annualRevenues = [];
   const annualUnits = [];
   const eff = A.budgetEfficiency?.[budgetPerMonth] ?? { cpcMultiplier: 1, cvrMultiplier: 1 };
+  const brandedBudget  = A.brandedBudgetAllocation?.[budgetPerMonth] ?? 0;
+  const shoppingBudget = budgetPerMonth - brandedBudget;
 
   for (let i = 0; i < iterations; i++) {
+    // Shopping params (cold traffic — efficiency penalties apply)
     const cpc         = triangularSample(A.cpc.aggressive, A.cpc.base, A.cpc.conservative) * eff.cpcMultiplier;
     const cvr         = triangularSample(A.shoppingCvr.conservative, A.shoppingCvr.base, A.shoppingCvr.aggressive) * eff.cvrMultiplier;
     const uplift      = triangularSample(A.storeUplift.conservative, A.storeUplift.base, A.storeUplift.aggressive);
+
+    // Branded search params (warm traffic — no efficiency penalty, volume-capped instead)
+    const bCpc        = triangularSample(A.brandedCpc.aggressive, A.brandedCpc.base, A.brandedCpc.conservative);
+    const bCvr        = triangularSample(A.brandedCvr.conservative, A.brandedCvr.base, A.brandedCvr.aggressive);
+
+    // Email / cart / win-back
     const emailCapt   = triangularSample(A.emailCaptureRate.conservative, A.emailCaptureRate.base, A.emailCaptureRate.aggressive);
     const welcomeCvr  = triangularSample(A.welcomeCvr.conservative, A.welcomeCvr.base, A.welcomeCvr.aggressive);
     const cartRecovery= triangularSample(A.cartRecoveryRate.conservative, A.cartRecoveryRate.base, A.cartRecoveryRate.aggressive);
     const winback     = triangularSample(A.winbackRate.conservative, A.winbackRate.base, A.winbackRate.aggressive);
 
+    // Subscription
+    const subAdopt    = triangularSample(A.subscriptionAdoptionRate.conservative, A.subscriptionAdoptionRate.base, A.subscriptionAdoptionRate.aggressive);
+
     let totalRev = 0;
     let totalUnits = 0;
+    const monthlySubs = [];
 
     for (let m = 0; m < 12; m++) {
       const ramp        = A.rampFactors[m];
-      const seasonalCpc = cpc * (A.cpcSeasonality?.[m] ?? 1.0);
-      const clicks      = budgetPerMonth / seasonalCpc;
+      const cpcSeason   = A.cpcSeasonality?.[m] ?? 1.0;
 
-      // Channel A: Shopping (cold traffic — single bottle AOV)
+      // Channel A: Google Shopping (non-branded, cold traffic)
+      const seasonalCpc         = cpc * cpcSeason;
+      const shoppingClicks      = shoppingBudget / seasonalCpc;
       const effectiveCvr        = cvr * uplift;
-      const shoppingConversions = clicks * effectiveCvr * ramp;
-      const shoppingRev         = shoppingConversions * BASELINE.adDrivenAov;
+      const shoppingConversions = shoppingClicks * effectiveCvr * ramp;
+      const shoppingRev         = shoppingConversions * BASELINE.shoppingAov;
 
-      // Channel B: Welcome series (only subscribers who did NOT already convert)
-      const nonConvertFrac     = Math.max(0, 1 - effectiveCvr);
-      const newSubscribers     = clicks * emailCapt * nonConvertFrac * ramp;
-      const welcomeConversions = newSubscribers * welcomeCvr;
+      // Channel F: Branded Search (warm traffic — own CPC/CVR, no uplift multiplier)
+      const brandedSeasonalCpc  = bCpc * cpcSeason;
+      const brandedClicks       = brandedBudget / brandedSeasonalCpc;
+      const brandedConversions  = brandedClicks * bCvr * ramp;
+      const brandedRev          = brandedConversions * BASELINE.brandedSearchAov;
+
+      // Non-converters from both channels feed into email/cart funnels
+      const shoppingNonConvert  = shoppingClicks * Math.max(0, 1 - effectiveCvr) * ramp;
+      const brandedNonConvert   = brandedClicks  * Math.max(0, 1 - bCvr) * ramp;
+      const totalNonConvert     = shoppingNonConvert + brandedNonConvert;
+
+      // Channel B: Welcome series (email subscribers who didn't convert)
+      const newEmailSubs       = totalNonConvert * emailCapt;
+      const welcomeConversions = newEmailSubs * welcomeCvr;
       const welcomeRev         = welcomeConversions * BASELINE.emailFlowAov;
 
-      // Channel C: Cart abandonment (ad-driven carts only in MC; organic added separately)
-      const adAbandonedCarts  = clicks * nonConvertFrac * A.cartAbandonRate * ramp;
-      const cartConversions   = adAbandonedCarts * cartRecovery;
-      const cartRev           = cartConversions * BASELINE.emailFlowAov;
+      // Channel C: Ad-driven cart abandonment recovery
+      const adAbandonedCarts   = totalNonConvert * A.cartAbandonRate;
+      const cartConversions    = adAbandonedCarts * cartRecovery;
+      const cartRev            = cartConversions * BASELINE.emailFlowAov;
 
-      // Channel D: Win-back (lapsed customers know the brand — higher AOV)
+      // Channel D: Win-back (lapsed customers)
       const addressableLapsed  = BASELINE.lapsedOneTime + BASELINE.lapsedReturning;
       const winbackConversions = m === 0 ? addressableLapsed * winback * 0.6
         : m < 3 ? addressableLapsed * winback * 0.2 / 2
         : addressableLapsed * winback * 0.2 / 9;
       const winbackRev = winbackConversions * BASELINE.winbackAov;
 
-      // Channel E: Organic abandoned cart recovery (existing 385/mo with 0% current recovery)
+      // Channel E: Organic abandoned cart recovery
       const organicCartConversions = BASELINE.abandonedCartsPerMonth * cartRecovery;
       const organicCartRev         = organicCartConversions * BASELINE.emailFlowAov;
 
-      totalRev   += shoppingRev + welcomeRev + cartRev + winbackRev + organicCartRev;
-      totalUnits += shoppingConversions * BASELINE.adDrivenUnitsPerOrder
+      // Channel G: Subscription renewals from past cohorts
+      const monthConversions = shoppingConversions + brandedConversions + welcomeConversions
+                             + cartConversions + winbackConversions + organicCartConversions;
+      monthlySubs.push(monthConversions * subAdopt);
+
+      let subRenewalRev = 0, subRenewalUnits = 0;
+      for (let c = 0; c < m; c++) {
+        const gap = m - c;
+        if (gap > 0 && gap % A.subscriptionIntervalMonths === 0) {
+          const cycle     = gap / A.subscriptionIntervalMonths;
+          const surviving = monthlySubs[c] * Math.pow(A.subscriptionRetentionRate, cycle);
+          subRenewalRev   += surviving * BASELINE.subscriptionRenewalAov;
+          subRenewalUnits += surviving * BASELINE.subscriptionRenewalUnitsPerOrder;
+        }
+      }
+
+      totalRev   += shoppingRev + brandedRev + welcomeRev + cartRev + winbackRev + organicCartRev + subRenewalRev;
+      totalUnits += shoppingConversions * BASELINE.shoppingUnitsPerOrder
+                  + brandedConversions  * BASELINE.brandedSearchUnitsPerOrder
                   + welcomeConversions  * BASELINE.emailFlowUnitsPerOrder
                   + cartConversions     * BASELINE.emailFlowUnitsPerOrder
                   + winbackConversions  * BASELINE.winbackUnitsPerOrder
-                  + organicCartConversions * BASELINE.emailFlowUnitsPerOrder;
+                  + organicCartConversions * BASELINE.emailFlowUnitsPerOrder
+                  + subRenewalUnits;
     }
 
     annualRevenues.push(totalRev);
@@ -271,64 +359,102 @@ function runMonteCarlo(budgetPerMonth, A, iterations = 10000) {
 // ─── Deterministic forecast for a given scenario tier ────────────────────────
 // A = per-request assumptions copy
 function forecastScenario(budgetPerMonth, tier, A) {
-  const eff         = A.budgetEfficiency?.[budgetPerMonth] ?? { cpcMultiplier: 1, cvrMultiplier: 1 };
-  const cpc         = A.cpc[tier] * eff.cpcMultiplier;
-  const cvr         = A.shoppingCvr[tier] * eff.cvrMultiplier;
-  const uplift      = A.storeUplift[tier];
-  const emailCapture= A.emailCaptureRate[tier];
-  const welcomeCvr  = A.welcomeCvr[tier];
-  const cartRecovery= A.cartRecoveryRate[tier];
-  const winbackRate = A.winbackRate[tier];
+  const eff          = A.budgetEfficiency?.[budgetPerMonth] ?? { cpcMultiplier: 1, cvrMultiplier: 1 };
+  const cpc          = A.cpc[tier] * eff.cpcMultiplier;
+  const cvr          = A.shoppingCvr[tier] * eff.cvrMultiplier;
+  const uplift       = A.storeUplift[tier];
+  const bCpc         = A.brandedCpc[tier];
+  const bCvr         = A.brandedCvr[tier];
+  const emailCapture = A.emailCaptureRate[tier];
+  const welcomeCvr   = A.welcomeCvr[tier];
+  const cartRecovery = A.cartRecoveryRate[tier];
+  const winbackRt    = A.winbackRate[tier];
+  const subAdopt     = A.subscriptionAdoptionRate[tier];
 
+  const brandedBudget  = A.brandedBudgetAllocation?.[budgetPerMonth] ?? 0;
+  const shoppingBudget = budgetPerMonth - brandedBudget;
   const addressableLapsed = BASELINE.lapsedOneTime + BASELINE.lapsedReturning;
   const monthly = [];
+  const monthlySubs = [];
 
   for (let m = 0; m < 12; m++) {
-    const ramp        = A.rampFactors[m];
-    const seasonalCpc = cpc * (A.cpcSeasonality?.[m] ?? 1.0);
-    const clicks      = budgetPerMonth / seasonalCpc;
+    const ramp      = A.rampFactors[m];
+    const cpcSeason = A.cpcSeasonality?.[m] ?? 1.0;
 
-    // Channel A: Shopping conversions (cold traffic — single bottle AOV)
+    // Channel A: Google Shopping (non-branded, cold traffic)
+    const seasonalCpc         = cpc * cpcSeason;
+    const shoppingClicks      = shoppingBudget / seasonalCpc;
     const effectiveCvr        = cvr * uplift;
-    const shoppingConversions = clicks * effectiveCvr * ramp;
+    const shoppingConversions = shoppingClicks * effectiveCvr * ramp;
     const shoppingOrders      = Math.round(shoppingConversions);
-    const shoppingRev         = shoppingConversions * BASELINE.adDrivenAov;
-    const shoppingUnits       = shoppingConversions * BASELINE.adDrivenUnitsPerOrder;
+    const shoppingRev         = shoppingConversions * BASELINE.shoppingAov;
+    const shoppingUnits       = shoppingConversions * BASELINE.shoppingUnitsPerOrder;
 
-    // Channel B: Welcome series (only non-converters who subscribed)
-    const nonConvertFrac     = Math.max(0, 1 - effectiveCvr);
-    const newSubscribers     = clicks * emailCapture * nonConvertFrac * ramp;
-    const welcomeConversions = newSubscribers * welcomeCvr;
+    // Channel F: Branded Search (warm traffic — own CPC/CVR, no uplift)
+    const brandedSeasonalCpc  = bCpc * cpcSeason;
+    const brandedClicks       = brandedBudget / brandedSeasonalCpc;
+    const brandedConversions  = brandedClicks * bCvr * ramp;
+    const brandedOrders       = Math.round(brandedConversions);
+    const brandedRev          = brandedConversions * BASELINE.brandedSearchAov;
+    const brandedUnits        = brandedConversions * BASELINE.brandedSearchUnitsPerOrder;
+
+    // Non-converters from both channels feed email/cart funnels
+    const shoppingNonConvert  = shoppingClicks * Math.max(0, 1 - effectiveCvr) * ramp;
+    const brandedNonConvert   = brandedClicks  * Math.max(0, 1 - bCvr) * ramp;
+    const totalNonConvert     = shoppingNonConvert + brandedNonConvert;
+
+    // Channel B: Welcome series (email subscribers who didn't convert)
+    const newEmailSubs       = totalNonConvert * emailCapture;
+    const welcomeConversions = newEmailSubs * welcomeCvr;
     const welcomeOrders      = Math.round(welcomeConversions);
     const welcomeRev         = welcomeConversions * BASELINE.emailFlowAov;
     const welcomeUnits       = welcomeConversions * BASELINE.emailFlowUnitsPerOrder;
 
     // Channel C: Ad-driven cart abandonment recovery
-    const adAbandonedCarts = clicks * nonConvertFrac * A.cartAbandonRate * ramp;
+    const adAbandonedCarts = totalNonConvert * A.cartAbandonRate;
     const cartConversions  = adAbandonedCarts * cartRecovery;
     const cartOrders       = Math.round(cartConversions);
     const cartRev          = cartConversions * BASELINE.emailFlowAov;
     const cartUnits        = cartConversions * BASELINE.emailFlowUnitsPerOrder;
 
-    // Channel D: Win-back (lapsed customers — higher AOV, they know the brand)
-    const winbackConversions = m === 0 ? addressableLapsed * winbackRate * 0.6
-      : m < 3 ? addressableLapsed * winbackRate * 0.2 / 2
-      : addressableLapsed * winbackRate * 0.2 / 9;
+    // Channel D: Win-back (lapsed customers)
+    const winbackConversions = m === 0 ? addressableLapsed * winbackRt * 0.6
+      : m < 3 ? addressableLapsed * winbackRt * 0.2 / 2
+      : addressableLapsed * winbackRt * 0.2 / 9;
     const winbackOrders = Math.round(winbackConversions);
     const winbackRev    = winbackConversions * BASELINE.winbackAov;
     const winbackUnits  = winbackConversions * BASELINE.winbackUnitsPerOrder;
 
-    // Channel E: Organic abandoned cart recovery (385 existing carts/mo, 0% current recovery)
+    // Channel E: Organic abandoned cart recovery
     const organicCartConversions = BASELINE.abandonedCartsPerMonth * cartRecovery;
     const organicCartOrders      = Math.round(organicCartConversions);
     const organicCartRev         = organicCartConversions * BASELINE.emailFlowAov;
     const organicCartUnits       = organicCartConversions * BASELINE.emailFlowUnitsPerOrder;
 
-    const totalConversions = shoppingConversions + welcomeConversions + cartConversions + winbackConversions + organicCartConversions;
+    // Channel G: Subscription renewals from past cohorts
+    const monthConversions = shoppingConversions + brandedConversions + welcomeConversions
+                           + cartConversions + winbackConversions + organicCartConversions;
+    monthlySubs.push(monthConversions * subAdopt);
+
+    let subRenewalRev = 0, subRenewalUnits = 0, subRenewalOrders = 0;
+    for (let c = 0; c < m; c++) {
+      const gap = m - c;
+      if (gap > 0 && gap % A.subscriptionIntervalMonths === 0) {
+        const cycle     = gap / A.subscriptionIntervalMonths;
+        const surviving = monthlySubs[c] * Math.pow(A.subscriptionRetentionRate, cycle);
+        subRenewalRev   += surviving * BASELINE.subscriptionRenewalAov;
+        subRenewalUnits += surviving * BASELINE.subscriptionRenewalUnitsPerOrder;
+        subRenewalOrders += surviving;
+      }
+    }
+
+    const totalConversions = shoppingConversions + brandedConversions + welcomeConversions
+                           + cartConversions + winbackConversions + organicCartConversions + subRenewalOrders;
     const totalOrders = Math.round(totalConversions);
-    const totalRev = shoppingRev + welcomeRev + cartRev + winbackRev + organicCartRev;
-    const totalUnits = Math.round(shoppingUnits + welcomeUnits + cartUnits + winbackUnits + organicCartUnits);
-    const gp = totalRev * BASELINE.blendedGmPct;
+    const totalRev = shoppingRev + brandedRev + welcomeRev + cartRev + winbackRev + organicCartRev + subRenewalRev;
+    const totalUn  = Math.round(shoppingUnits + brandedUnits + welcomeUnits + cartUnits
+                              + winbackUnits + organicCartUnits + subRenewalUnits);
+    const gp   = totalRev * BASELINE.blendedGmPct;
     const roas = budgetPerMonth > 0 ? totalRev / budgetPerMonth : 0;
 
     monthly.push({
@@ -337,15 +463,17 @@ function forecastScenario(budgetPerMonth, tier, A) {
       rampFactor: ramp,
       totalOrders,
       totalRevenue: Math.round(totalRev),
-      totalUnits,
+      totalUnits: totalUn,
       grossProfit: Math.round(gp),
       roas: Math.round(roas * 100) / 100,
       byChannel: {
-        shopping:         { orders: shoppingOrders,     revenue: Math.round(shoppingRev),     units: Math.round(shoppingUnits) },
-        welcomeSeries:    { orders: welcomeOrders,      revenue: Math.round(welcomeRev),      units: Math.round(welcomeUnits) },
-        cartRecovery:     { orders: cartOrders,          revenue: Math.round(cartRev),         units: Math.round(cartUnits) },
-        winback:          { orders: winbackOrders,       revenue: Math.round(winbackRev),      units: Math.round(winbackUnits) },
-        organicCartRecov: { orders: organicCartOrders,   revenue: Math.round(organicCartRev),  units: Math.round(organicCartUnits) },
+        shopping:         { orders: shoppingOrders,            revenue: Math.round(shoppingRev),       units: Math.round(shoppingUnits) },
+        brandedSearch:    { orders: brandedOrders,             revenue: Math.round(brandedRev),        units: Math.round(brandedUnits) },
+        welcomeSeries:    { orders: welcomeOrders,             revenue: Math.round(welcomeRev),        units: Math.round(welcomeUnits) },
+        cartRecovery:     { orders: cartOrders,                revenue: Math.round(cartRev),           units: Math.round(cartUnits) },
+        winback:          { orders: winbackOrders,             revenue: Math.round(winbackRev),        units: Math.round(winbackUnits) },
+        organicCartRecov: { orders: organicCartOrders,         revenue: Math.round(organicCartRev),    units: Math.round(organicCartUnits) },
+        subscriptionRenewals: { orders: Math.round(subRenewalOrders), revenue: Math.round(subRenewalRev), units: Math.round(subRenewalUnits) },
       },
     });
   }
@@ -428,6 +556,7 @@ export default async function handler(req) {
       emailCapture: parseFloat(url.searchParams.get("emailCapture")) || null,
       cartRecovery: parseFloat(url.searchParams.get("cartRecovery")) || null,
       winbackRate:  parseFloat(url.searchParams.get("winbackRate"))  || null,
+      subAdoption:  parseFloat(url.searchParams.get("subAdoption"))  || null,
       safetyStock:  parseFloat(url.searchParams.get("safetyStock"))  || null,
     };
 
@@ -436,10 +565,17 @@ export default async function handler(req) {
       cpc:              { ...ASSUMPTIONS.cpc },
       shoppingCvr:      { ...ASSUMPTIONS.shoppingCvr },
       storeUplift:      { ...ASSUMPTIONS.storeUplift },
+      brandedCpc:       { ...ASSUMPTIONS.brandedCpc },
+      brandedCvr:       { ...ASSUMPTIONS.brandedCvr },
+      brandedBudgetAllocation: ASSUMPTIONS.brandedBudgetAllocation,  // read-only
       emailCaptureRate: { ...ASSUMPTIONS.emailCaptureRate },
       welcomeCvr:       { ...ASSUMPTIONS.welcomeCvr },
       cartRecoveryRate: { ...ASSUMPTIONS.cartRecoveryRate },
       winbackRate:      { ...ASSUMPTIONS.winbackRate },
+      subscriptionAdoptionRate: { ...ASSUMPTIONS.subscriptionAdoptionRate },
+      subscriptionRetentionRate: ASSUMPTIONS.subscriptionRetentionRate,
+      subscriptionIntervalMonths: ASSUMPTIONS.subscriptionIntervalMonths,
+      subscriptionDiscount: ASSUMPTIONS.subscriptionDiscount,
       rampFactors:       ASSUMPTIONS.rampFactors,       // read-only, safe to share
       cpcSeasonality:    ASSUMPTIONS.cpcSeasonality,   // read-only, safe to share
       budgetEfficiency:  ASSUMPTIONS.budgetEfficiency,  // read-only, safe to share
@@ -479,6 +615,12 @@ export default async function handler(req) {
       A.winbackRate.base         = overrides.winbackRate / 100;
       A.winbackRate.aggressive   = Math.min(0.15, ASSUMPTIONS.winbackRate.aggressive * ratio);
     }
+    if (overrides.subAdoption) {
+      const ratio = (overrides.subAdoption / 100) / ASSUMPTIONS.subscriptionAdoptionRate.base;
+      A.subscriptionAdoptionRate.conservative = Math.max(0.02, ASSUMPTIONS.subscriptionAdoptionRate.conservative * ratio);
+      A.subscriptionAdoptionRate.base         = overrides.subAdoption / 100;
+      A.subscriptionAdoptionRate.aggressive   = Math.min(0.50, ASSUMPTIONS.subscriptionAdoptionRate.aggressive * ratio);
+    }
     if (overrides.safetyStock)  A.safetyStockMultiplier = overrides.safetyStock;
 
     // Run deterministic scenarios for both budgets
@@ -511,11 +653,13 @@ export default async function handler(req) {
           },
           channelBreakdown: base.monthly.map(m => ({
             month: m.monthLabel,
-            shopping:         m.byChannel.shopping.revenue,
-            welcomeSeries:    m.byChannel.welcomeSeries.revenue,
-            cartRecovery:     m.byChannel.cartRecovery.revenue,
-            winback:          m.byChannel.winback.revenue,
-            organicCartRecov: m.byChannel.organicCartRecov.revenue,
+            shopping:             m.byChannel.shopping.revenue,
+            brandedSearch:        m.byChannel.brandedSearch.revenue,
+            welcomeSeries:        m.byChannel.welcomeSeries.revenue,
+            cartRecovery:         m.byChannel.cartRecovery.revenue,
+            winback:              m.byChannel.winback.revenue,
+            organicCartRecov:     m.byChannel.organicCartRecov.revenue,
+            subscriptionRenewals: m.byChannel.subscriptionRenewals.revenue,
           })),
         },
       };
@@ -540,17 +684,24 @@ export default async function handler(req) {
         cpc: A.cpc,
         shoppingCvr: A.shoppingCvr,
         storeUplift: A.storeUplift,
+        brandedCpc: A.brandedCpc,
+        brandedCvr: A.brandedCvr,
+        brandedBudgetAllocation: A.brandedBudgetAllocation,
         emailCaptureRate: A.emailCaptureRate,
         welcomeCvr: A.welcomeCvr,
         cartRecoveryRate: A.cartRecoveryRate,
         winbackRate: A.winbackRate,
+        subscriptionAdoptionRate: A.subscriptionAdoptionRate,
+        subscriptionRetentionRate: A.subscriptionRetentionRate,
+        subscriptionIntervalMonths: A.subscriptionIntervalMonths,
         safetyStockMultiplier: A.safetyStockMultiplier,
         leadTimeWeeks: A.leadTimeWeeks,
         recommendedOrderLeadWeeks: A.recommendedOrderLeadWeeks,
       },
       scenarios,
       methodology: {
-        model: "Blended Multi-Channel with Monte Carlo Simulation",
+        model: "Blended 7-Channel with Monte Carlo Simulation",
+        channels: "A: Google Shopping, B: Welcome Series, C: Cart Recovery, D: Win-Back, E: Organic Cart Recovery, F: Branded Search, G: Subscription Renewals",
         monteCarlo: {
           iterations: 10000,
           distributionType: "Triangular (min=conservative, mode=base, max=aggressive)",
@@ -562,8 +713,10 @@ export default async function handler(req) {
           totalClicks: 12000,
           totalImpressions: 234388,
           totalConversions: 1050,
-          campaignType: "BRANDED_SEARCH — not directly comparable to Google Shopping",
+          campaignType: "BRANDED_SEARCH — modeled as separate channel (F) with own CPC/CVR",
         },
+        brandedSearchNote: "Branded search is modeled as a separate channel with its own CPC ($0.50-$0.90) and CVR (5-10%) based on historical performance on the unoptimized store ($0.56 CPC, 8.75% CVR in 2021-2022) adjusted for 2026. Budget allocation is capped by estimated brand search volume.",
+        subscriptionNote: "Subscription renewals are modeled using cohort-based LTV: each month's new subscribers (18% adoption rate) generate renewals every 2 months with 75% retention per cycle (avg lifetime ~8 months). Only renewals within the 12-month forecast horizon are counted.",
         storeImprovementsNote: "CVR uplifts are cumulative since 2022 campaigns. Store is now CRO-optimized on Botanical OS 2.0 with subscription, lower free ship threshold, and better PDPs.",
         retailHaloNote: "6,000+ TJX retail stores (TJ Maxx, Marshalls, HomeGoods, Sierra) create brand recognition that increases online CVR for shoppers who've seen the product in-store.",
         moqNote: "Manufacturer MOQ is 6,000 units per SKU. Incremental DTC units should be added to retail production runs — if combined DTC + retail demand exceeds 6K, no separate MOQ run is required.",
