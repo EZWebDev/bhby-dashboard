@@ -2,7 +2,9 @@
  * Netlify Function: google-ads
  * Fetches last 30 days of Google Ads performance metrics.
  *
- * Uses the Google Ads REST API v19 (no npm dependencies — pure fetch).
+ * Uses the Google Ads REST API v21 (no npm dependencies — pure fetch).
+ * NOTE: Google sunsets API versions ~yearly. If this 404s with an HTML page,
+ * bump GOOGLE_ADS_API_VERSION to the current live version (was v19, now v21).
  * On each call:
  *   1. Exchanges GOOGLE_ADS_REFRESH_TOKEN for a short-lived access token
  *   2. Runs a GAQL query against the customer resource
@@ -21,7 +23,7 @@
 
 import { verifyToken } from "./_auth-verify.mjs";
 
-const GOOGLE_ADS_API_VERSION = "v19";
+const GOOGLE_ADS_API_VERSION = "v21";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 
 const CORS = {
@@ -76,18 +78,18 @@ async function queryGoogleAds(accessToken, devToken, customerId, loginCustomerId
     throw new Error(`Google Ads API error ${res.status}: ${text}`);
   }
 
-  // searchStream returns NDJSON (one JSON object per line)
+  // searchStream returns a JSON ARRAY of chunks: [{ results: [...] }, ...]
+  // (NOT NDJSON — parsing it line-by-line silently yields zero rows.)
   const text = await res.text();
   const rows = [];
-  for (const line of text.trim().split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      const parsed = JSON.parse(line);
-      // Each chunk has a "results" array
-      if (parsed.results) rows.push(...parsed.results);
-    } catch {
-      // skip malformed lines
-    }
+  let chunks;
+  try {
+    chunks = JSON.parse(text);
+  } catch (e) {
+    throw new Error(`Google Ads response parse error: ${e.message}: ${text.slice(0, 200)}`);
+  }
+  for (const chunk of Array.isArray(chunks) ? chunks : [chunks]) {
+    if (chunk && chunk.results) rows.push(...chunk.results);
   }
   return rows;
 }
