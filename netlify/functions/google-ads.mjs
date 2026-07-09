@@ -246,6 +246,19 @@ export default async function handler(req) {
       ? Math.round((result.totalConversionsValue / result.totalSpend) * 100) / 100
       : null;
 
+    // Outcome metrics derived from the (de-doubled) conversion figures.
+    // costPerConversion = CPA; adAov = revenue per ad-driven order;
+    // convRate = ad-driven conversions per click.
+    result.costPerConversion = result.totalConversions > 0
+      ? Math.round((result.totalSpend / result.totalConversions) * 100) / 100
+      : null;
+    result.adAov = result.totalConversions > 0
+      ? Math.round((result.totalConversionsValue / result.totalConversions) * 100) / 100
+      : null;
+    result.convRate = result.totalClicks > 0
+      ? Math.round((result.totalConversions / result.totalClicks) * 10000) / 100
+      : null;
+
     return new Response(JSON.stringify(result), { status: 200, headers: CORS });
   } catch (err) {
     console.error("[google-ads]", err);
