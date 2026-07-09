@@ -119,6 +119,10 @@ async function fetchAllAbandoned(token) {
 }
 
 function processAbandoned(checkouts) {
+  // The fetch returns oldest-first (sortKey CREATED_AT, no reverse), so the
+  // table was showing the 10 OLDEST carts in the window. Sort newest-first here
+  // so "Recent Abandoned Checkouts" actually shows the most recent ones.
+  checkouts = [...checkouts].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   const total = checkouts.length;
   const recovered = checkouts.filter((c) => c.completedAt !== null).length;
   const abandoned = total - recovered;

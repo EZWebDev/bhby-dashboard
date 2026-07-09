@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BHBY — Ad Analytics Dashboard</title>
+<link rel="icon" type="image/png" sizes="32x32" href="https://behappybeyou.net/cdn/shop/t/31/assets/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="https://behappybeyou.net/cdn/shop/t/31/assets/favicon-16x16.png">
+<link rel="apple-touch-icon" href="https://behappybeyou.net/cdn/shop/t/31/assets/android-chrome-192x192.png">
+<link rel="shortcut icon" href="https://behappybeyou.net/cdn/shop/t/31/assets/favicon.ico">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
@@ -16,7 +20,10 @@
     --blue: #2563eb;
     --purple: #7c3aed;
     --teal: #0d9488;
-    --bg: #f5f6fa;
+    --coral: #E2694F;
+    --coral-deep: #C0492F;
+    --cream: #FBF5EC;
+    --bg: #f7f4ef;
     --surface: #ffffff;
     --border: #dde1ed;
     --text: #1a1d2e;
@@ -277,9 +284,12 @@
 
 <!-- Header -->
 <div style="background:var(--surface);border-bottom:1px solid var(--border);padding:16px 32px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
-  <div>
-    <h1 class="font-display" style="font-size:24px;color:var(--gold);font-weight:900;line-height:1;">BHBY Analytics</h1>
-    <div class="font-mono" style="font-size:11px;color:var(--muted);margin-top:3px;">Admin Dashboard — behappybeyou.net</div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <img src="https://behappybeyou.net/cdn/shop/t/31/assets/android-chrome-192x192.png" alt="BHBY" width="34" height="34" style="border-radius:8px;flex-shrink:0;">
+    <div>
+      <h1 class="font-display" style="font-size:24px;color:var(--coral-deep);font-weight:900;line-height:1;">BHBY Analytics</h1>
+      <div class="font-mono" style="font-size:11px;color:var(--muted);margin-top:3px;">Admin Dashboard · behappybeyou.net</div>
+    </div>
   </div>
   <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
     <span id="lastRefreshed" class="font-mono" style="font-size:11px;color:var(--muted);">—</span>
@@ -382,7 +392,7 @@
     <span class="font-mono" style="font-size:11px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;">Google Ads Performance</span>
     <span id="ads-loading" class="font-mono" style="font-size:10px;color:var(--muted);">Loading…</span>
   </div>
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;" class="kpi-row-ads" id="adsKpiRow">
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-bottom:24px;" class="kpi-row-ads" id="adsKpiRow">
     <div class="kpi-card" id="kpi-adspend">
       <div class="kpi-icon" style="background:rgba(37,99,235,0.1);">📢</div>
       <div class="kpi-label">Total Ad Spend</div>
@@ -406,6 +416,12 @@
       <div class="kpi-label">TACOS</div>
       <div class="kpi-val orange" id="val-tacos"><span class="skeleton" style="width:60px;height:32px;display:block;"></span></div>
       <div class="kpi-sub" id="sub-tacos">Ad spend / total revenue</div>
+    </div>
+    <div class="kpi-card" id="kpi-roas" style="border-color:var(--coral);">
+      <div class="kpi-icon" style="background:rgba(226,105,79,0.12);">📈</div>
+      <div class="kpi-label">Blended ROAS</div>
+      <div class="kpi-val" style="color:var(--coral-deep);" id="val-roas"><span class="skeleton" style="width:60px;height:32px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-roas">Total revenue ÷ ad spend</div>
     </div>
   </div>
 
@@ -1509,6 +1525,13 @@ function computeTacos() {
     const tacos = (_adSpend / _totalRevenue) * 100;
     setKpi("tacos", fmtPct(tacos), "Ad spend / total revenue");
   }
+  // Blended ROAS = total store revenue / ad spend (real numbers, no double-count).
+  // BLENDED (credits all revenue), not channel ROAS. Google-attributed ROAS/ACOS
+  // are inflated ~1.8x by the conversion double-count until that is fixed.
+  if (_adSpend != null && _adSpend > 0 && _totalRevenue != null) {
+    const roas = _totalRevenue / _adSpend;
+    setKpi("roas", roas.toFixed(2) + "×", "Total revenue / ad spend (blended)");
+  }
 }
 
 async function loadGoogleAds() {
@@ -1521,7 +1544,7 @@ async function loadGoogleAds() {
 
     // Google Ads not yet configured — show placeholder cards
     if (d.configured === false) {
-      ["adspend","cpc","acos","tacos"].forEach(k => {
+      ["adspend","cpc","acos","tacos","roas"].forEach(k => {
         setKpi(k, '<span style="color:var(--muted);font-size:14px;">Not configured</span>', "");
       });
       document.getElementById("sub-adspend").textContent = "Set GOOGLE_ADS_* env vars in Netlify";
@@ -1543,7 +1566,7 @@ async function loadGoogleAds() {
 
   } catch (err) {
     if (loadingEl) loadingEl.textContent = "Error";
-    ["adspend","cpc","acos","tacos"].forEach(k =>
+    ["adspend","cpc","acos","tacos","roas"].forEach(k =>
       setKpi(k, `<span style="color:var(--red);font-size:14px;">Error</span>`, "")
     );
     console.error("[google-ads]", err.message);
