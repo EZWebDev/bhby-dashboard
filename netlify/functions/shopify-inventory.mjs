@@ -22,6 +22,7 @@ const INVENTORY_QUERY = `
           id
           title
           status
+          productType
           variants(first: 100) {
             edges {
               node {
@@ -93,6 +94,22 @@ async function fetchAllInventory(token) {
   return allProducts;
 }
 
+// Only INDIVIDUAL single-bottle variants have real, non-derived stock. Multipack
+// tiers ("3 Bottles" / "6 Bottles") and Bundle products get their inventory DERIVED
+// by Simple Bundles (floor(individual / pack size)), so flagging them is misleading.
+function isRealSingleStock(product, v) {
+  if ((product.productType || "").toLowerCase() === "bundle") return false;
+  const title = (v.title || "").toLowerCase().trim();
+  const sku = (v.sku || "").toUpperCase();
+  const ptitle = (product.title || "").toLowerCase();
+  // "3 bottles", "6 bottles", "2-pack", "12 bottles"... = a multipack tier -> skip.
+  if (/(^|\s)([2-9]|\d\d)\s*(bottle|pack|pk)/.test(title)) return false;
+  // non-retail helpers: upgrade/swap products, bundle parents, mixes, samples, gifts
+  if (/^(UPG|BNDL|MIX|SAMPLE|TEST|GIFT|SWAP)/.test(sku)) return false;
+  if (/upgrade|display only|swap/.test(ptitle)) return false;
+  return true; // "Individual" / "Default Title" / "1 Bottle" = real single-bottle stock
+}
+
 function buildWarnings(products, threshold) {
   const warnings = [];
   const stockOk = [];
@@ -105,6 +122,8 @@ function buildWarnings(products, threshold) {
       const v = edge.node;
       // Skip untracked variants
       if (!v.inventoryItem?.tracked) continue;
+      // Only real single-bottle stock — skip multipack tiers + bundles (derived inventory)
+      if (!isRealSingleStock(product, v)) continue;
       totalVariants++;
 
       const qty = v.inventoryQuantity ?? 0;

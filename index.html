@@ -419,9 +419,9 @@
     </div>
     <div class="kpi-card" id="kpi-roas" style="border-color:var(--coral);">
       <div class="kpi-icon" style="background:rgba(226,105,79,0.12);">📈</div>
-      <div class="kpi-label">Blended ROAS</div>
+      <div class="kpi-label">Google Ad ROAS</div>
       <div class="kpi-val" style="color:var(--coral-deep);" id="val-roas"><span class="skeleton" style="width:60px;height:32px;display:block;"></span></div>
-      <div class="kpi-sub" id="sub-roas">Total revenue ÷ ad spend</div>
+      <div class="kpi-sub" id="sub-roas">Ad revenue ÷ spend</div>
     </div>
   </div>
 
@@ -1525,13 +1525,6 @@ function computeTacos() {
     const tacos = (_adSpend / _totalRevenue) * 100;
     setKpi("tacos", fmtPct(tacos), "Ad spend / total revenue");
   }
-  // Blended ROAS = total store revenue / ad spend (real numbers, no double-count).
-  // BLENDED (credits all revenue), not channel ROAS. Google-attributed ROAS/ACOS
-  // are inflated ~1.8x by the conversion double-count until that is fixed.
-  if (_adSpend != null && _adSpend > 0 && _totalRevenue != null) {
-    const roas = _totalRevenue / _adSpend;
-    setKpi("roas", roas.toFixed(2) + "×", "Total revenue / ad spend (blended)");
-  }
 }
 
 async function loadGoogleAds() {
@@ -1559,9 +1552,16 @@ async function loadGoogleAds() {
 
     if (d.acos !== null) {
       const acosColor = d.acos > 50 ? "var(--red)" : d.acos > 30 ? "var(--orange)" : "var(--green)";
-      setKpi("acos", `<span style="color:${acosColor};">${fmtPct(d.acos)}</span>`, "Ad spend / ad-attributed revenue");
+      setKpi("acos", `<span style="color:${acosColor};">${fmtPct(d.acos)}</span>`, "Ad spend ÷ ad revenue" + (d.conversionAction ? " (" + d.conversionAction + ")" : ""));
     } else {
       setKpi("acos", '<span style="color:var(--muted);font-size:14px;">No conv. data</span>', "Enable conversion tracking");
+    }
+
+    if (d.roas != null) {
+      const roasColor = d.roas >= 2 ? "var(--green)" : d.roas >= 1 ? "var(--orange)" : "var(--red)";
+      setKpi("roas", `<span style="color:${roasColor};">${d.roas.toFixed(2)}×</span>`, "Ad revenue ÷ spend");
+    } else {
+      setKpi("roas", '<span style="color:var(--muted);font-size:14px;">No conv. data</span>', "Enable conversion tracking");
     }
 
   } catch (err) {
