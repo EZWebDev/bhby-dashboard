@@ -13,6 +13,11 @@ import { verifyToken } from "./_auth-verify.mjs";
  *
  * NOTE: Shopify does not have a "sessions" API in Admin GraphQL.
  * Cart abandonment rate here = open (unrecovered) checkouts / all checkouts.
+ *
+ * Sample/gift/test orders (excluded from shopify-orders metrics) do NOT leak in
+ * here: those are placed/draft orders created in the admin, which never enter the
+ * storefront checkout flow, so they never appear as abandonedCheckouts. The
+ * abandonedCheckout node also has no order-tag field to filter on. No change needed.
  */
 
 const STORE = "behappybeyou1.myshopify.com";

@@ -13,6 +13,22 @@ const API_VERSION = "2026-01";
 const GQL_URL = `https://${STORE}/admin/api/${API_VERSION}/graphql.json`;
 const INVENTORY_THRESHOLD = 50;
 
+/*
+ * Non-sale orders (free samples, TikTok gifts, replacements, test/seed orders)
+ * distort DTC revenue/AOV/units. Per data-hygiene rule, exclude by TAG (not just
+ * $0 total — some carry a non-zero value). Word-boundary + case-insensitive so
+ * "TikTok Shop", "Free Sample", "Gift Order", "test-order" all match, but
+ * legit tags like "latest" or "contest" do not.
+ */
+const EXCLUDE_TAG_RE = /\b(sample|tiktok|gift|replacement|test|seed)\b/i;
+
+function orderExcludeReason(order) {
+  for (const tag of order.tags || []) {
+    if (EXCLUDE_TAG_RE.test(tag)) return tag;
+  }
+  return null;
+}
+
 const ORDERS_QUERY = `
   query GetOrders($cursor: String) {
     orders(
@@ -30,6 +46,7 @@ const ORDERS_QUERY = `
           id
           name
           createdAt
+          tags
           totalPriceSet { shopMoney { amount } }
           subtotalPriceSet { shopMoney { amount } }
           totalShippingPriceSet { shopMoney { amount } }
@@ -124,10 +141,26 @@ async function fetchAllOrders(token) {
   return allOrders;
 }
 
-function processOrders(orders) {
+function processOrders(allOrders) {
   const skuMap = new Map();
   const utmMap = new Map();
   const dayMap = new Map();
+
+  // Partition out non-sale orders (samples/gifts/tests) BEFORE any metric.
+  const excludedTagCounts = {};
+  const orders = [];
+  let excludedCount = 0;
+  let excludedRevenue = 0;
+  for (const order of allOrders) {
+    const reason = orderExcludeReason(order);
+    if (reason) {
+      excludedCount++;
+      excludedRevenue += parseFloat(order.totalPriceSet?.shopMoney?.amount || 0);
+      excludedTagCounts[reason] = (excludedTagCounts[reason] || 0) + 1;
+      continue;
+    }
+    orders.push(order);
+  }
 
   let totalRevenue = 0;
   let totalShipping = 0;
@@ -227,6 +260,9 @@ function processOrders(orders) {
     aovTimeSeries,
     salesBySku,
     utmBreakdown,
+    excludedOrders: excludedCount,
+    excludedRevenue: Math.round(excludedRevenue * 100) / 100,
+    excludedTagCounts,
     pulledAt: new Date().toISOString(),
     windowDays: 30,
   };
