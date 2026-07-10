@@ -552,6 +552,7 @@
       <div class="chart-title" style="margin-bottom:0;">Recent Abandoned Checkouts — Last 30 Days</div>
       <span id="abandoned-loading" class="font-mono" style="font-size:10px;color:var(--muted);">Loading…</span>
     </div>
+    <div id="abandoned-botnote" class="font-mono" style="font-size:10px;color:var(--muted);margin-bottom:10px;"></div>
     <div id="abandoned-error" style="display:none;"></div>
     <div class="table-scroll">
       <table class="data-table">
@@ -1020,7 +1021,11 @@ async function loadAbandoned() {
 
     // KPIs
     setKpi("abandonment", fmtPct(d.abandonmentRate), `${fmtPct(100 - d.abandonmentRate)} recovered`);
-    setKpi("abandoned-value", fmt$cents(d.totalAbandonedValue), `${d.abandoned} carts unrecovered`);
+    setKpi("abandoned-value", fmt$cents(d.totalAbandonedValue), `${fmtN(d.abandoned)} real carts · bots excluded`);
+    const abNote = document.getElementById("abandoned-botnote");
+    if (abNote) abNote.textContent = d.suspectedBots > 0
+      ? `Hiding ${fmtN(d.suspectedBots)} suspected bot / test checkouts ($${fmtN(d.suspectedBotValue)}) — "name+digits@free-mail" card-testing pattern`
+      : "";
 
     // Table
     const tbody = document.getElementById("abandonedTableBody");

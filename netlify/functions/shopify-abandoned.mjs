@@ -24,6 +24,33 @@ const STORE = "behappybeyou1.myshopify.com";
 const API_VERSION = "2026-01";
 const GQL_URL = `https://${STORE}/admin/api/${API_VERSION}/graphql.json`;
 
+/*
+ * Card-testing bots flood abandoned checkouts with fake "namedigits@freemail"
+ * emails (e.g. umairhameed2026@outlook.com hit checkout 6x, klopez0802@gmail.com,
+ * AndreaMannino12@hotmail.com). They never complete, so they push the abandonment
+ * rate toward ~99% and inflate the "value at risk" with un-recoverable noise.
+ * Filter them (plus internal test emails) out so the metrics reflect real
+ * customers. Heuristic — the count is exposed and labeled in the UI so it's
+ * auditable and tunable. Real customers (no trailing digits: monikaalban@,
+ * randylhorner@, melisamonroe@) are NOT matched.
+ */
+const TEST_EMAIL_DOMAINS = ["ezweb.dev"];
+// localpart = 4+ letters, optional single .-_ + more letters, then 2+ trailing digits, nothing else.
+const BOT_LOCALPART_RE = /^[a-z]{4,}([._-][a-z]+)?\d{2,}$/i;
+function isSuspectedBotCheckout(checkout) {
+  const email = checkout.customer?.email;
+  if (!email) return false; // keep no-email drops as genuine abandonment
+  const at = email.indexOf("@");
+  if (at < 1) return false;
+  const localPart = email.slice(0, at);
+  const domain = email.slice(at + 1).toLowerCase();
+  if (TEST_EMAIL_DOMAINS.some((d) => domain === d || domain.endsWith("." + d))) return true;
+  return BOT_LOCALPART_RE.test(localPart);
+}
+function maskEmail(email) {
+  return email ? email.replace(/(?<=.).(?=[^@]*@)/g, "*") : null;
+}
+
 // Shopify Admin GraphQL uses abandonedCheckouts on the QueryRoot
 const ABANDONED_QUERY = `
   query GetAbandonedCheckouts($cursor: String, $since: String!) {
@@ -128,6 +155,18 @@ function processAbandoned(checkouts) {
   // table was showing the 10 OLDEST carts in the window. Sort newest-first here
   // so "Recent Abandoned Checkouts" actually shows the most recent ones.
   checkouts = [...checkouts].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  // Partition out suspected card-testing bots + internal test emails BEFORE any metric.
+  const bots = [];
+  const real = [];
+  for (const c of checkouts) (isSuspectedBotCheckout(c) ? bots : real).push(c);
+  checkouts = real;
+  const suspectedBots = bots.length;
+  const suspectedBotValue = Math.round(
+    bots.reduce((s, c) => s + parseFloat(c.totalPriceSet?.shopMoney?.amount || 0), 0) * 100
+  ) / 100;
+  const suspectedBotSamples = bots.slice(0, 8).map((c) => maskEmail(c.customer?.email)).filter(Boolean);
+
   const total = checkouts.length;
   const recovered = checkouts.filter((c) => c.completedAt !== null).length;
   const abandoned = total - recovered;
@@ -165,7 +204,7 @@ function processAbandoned(checkouts) {
           url: checkout.abandonedCheckoutUrl || null,
           itemCount: checkout.lineItems.edges.reduce((s, e) => s + e.node.quantity, 0),
           firstItem: checkout.lineItems.edges[0]?.node?.title || "—",
-          email: checkout.customer?.email ? checkout.customer.email.replace(/(?<=.).(?=[^@]*@)/g, "*") : null,
+          email: maskEmail(checkout.customer?.email),
         });
       }
     }
@@ -197,6 +236,10 @@ function processAbandoned(checkouts) {
     totalRecoveredValue: Math.round(totalRecoveredValue * 100) / 100,
     timeSeries,
     recentAbandoned,
+    suspectedBots,
+    suspectedBotValue,
+    suspectedBotSamples,
+    rawTotal: total + suspectedBots,
     pulledAt: new Date().toISOString(),
   };
 }
