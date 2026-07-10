@@ -260,6 +260,21 @@
   @media (max-width: 768px) {
     .kpi-val { font-size: 22px; }
   }
+
+  /* ── Metric grid: fills every row at all widths (replaces JS fixGrids) ── */
+  .metric-grid { display:grid; gap:14px; grid-template-columns:repeat(4,1fr); margin-bottom:14px; }
+  @media (max-width:1080px){ .metric-grid { grid-template-columns:repeat(2,1fr); } }
+  @media (max-width:600px){ .metric-grid { grid-template-columns:1fr; } }
+  .kpi-rowlabel { font-family:'DM Mono',monospace; font-size:10px; letter-spacing:0.14em;
+    text-transform:uppercase; color:var(--muted); margin:2px 0 9px; display:flex; align-items:center; gap:8px; }
+  .kpi-rowlabel::after { content:""; flex:1; height:1px; background:var(--border); }
+  /* Tighter cards + stronger value presence (less empty space) */
+  .kpi-card { padding:16px 18px; display:flex; flex-direction:column; }
+  .kpi-icon { width:30px; height:30px; font-size:15px; margin-bottom:8px; border-radius:7px; }
+  .kpi-label { font-size:10px; margin-bottom:4px; }
+  .kpi-val { font-size:26px; line-height:1.15; font-variant-numeric:tabular-nums; }
+  .kpi-sub { font-size:11px; margin-top:3px; }
+  @media (max-width:768px){ .kpi-val { font-size:23px; } }
 </style>
 </head>
 <body>
@@ -313,7 +328,8 @@
   </div>
 
   <!-- ROW 1: KPI Cards — Revenue, AOV, Shipping, Orders -->
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px;" class="kpi-row-1">
+  <div class="kpi-rowlabel">Sales</div>
+  <div class="metric-grid kpi-row-1">
     <div class="kpi-card" id="kpi-revenue">
       <div class="kpi-icon" style="background:rgba(200,154,16,0.1);">💰</div>
       <div class="kpi-label">Total Revenue</div>
@@ -345,7 +361,8 @@
   </div>
 
   <!-- ROW 2: KPI Cards — New customers, Returning, Abandonment rate, Abandoned value -->
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;" class="kpi-row-2">
+  <div class="kpi-rowlabel">Customers &amp; Checkout</div>
+  <div class="metric-grid kpi-row-2">
     <div class="kpi-card">
       <div class="kpi-icon" style="background:rgba(22,163,74,0.1);">👤</div>
       <div class="kpi-label">New Customers</div>
@@ -372,75 +389,64 @@
     </div>
   </div>
 
-  <!-- ROW 3: Google Ads KPIs — Total Spend, CPC, ACOS, TACOS -->
+  <!-- Google Ads: Spend & Return (4) + Efficiency & Conversions (4) -->
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;margin-top:4px;">
     <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#4285f4;"></span>
     <span class="font-mono" style="font-size:11px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;">Google Ads Performance</span>
     <span id="ads-loading" class="font-mono" style="font-size:10px;color:var(--muted);">Loading…</span>
   </div>
-  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-bottom:24px;" class="kpi-row-ads" id="adsKpiRow">
+  <div class="kpi-rowlabel">Spend &amp; Return</div>
+  <div class="metric-grid kpi-row-ads">
     <div class="kpi-card" id="kpi-adspend">
       <div class="kpi-icon" style="background:rgba(37,99,235,0.1);">📢</div>
-      <div class="kpi-label">Total Ad Spend</div>
-      <div class="kpi-val blue" id="val-adspend"><span class="skeleton" style="width:80px;height:32px;display:block;"></span></div>
-      <div class="kpi-sub" id="sub-adspend">Google Ads — last 30d</div>
+      <div class="kpi-label">Ad Spend</div>
+      <div class="kpi-val blue" id="val-adspend"><span class="skeleton" style="width:80px;height:28px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-adspend">Google Ads · last 30d</div>
     </div>
-    <div class="kpi-card" id="kpi-cpc">
-      <div class="kpi-icon" style="background:rgba(13,148,136,0.1);">🖱️</div>
-      <div class="kpi-label">CPC</div>
-      <div class="kpi-val teal" id="val-cpc"><span class="skeleton" style="width:60px;height:32px;display:block;"></span></div>
-      <div class="kpi-sub" id="sub-cpc">Cost per click</div>
-    </div>
-    <div class="kpi-card" id="kpi-acos">
-      <div class="kpi-icon" style="background:rgba(124,58,237,0.1);">🎯</div>
-      <div class="kpi-label">ACOS</div>
-      <div class="kpi-val purple" id="val-acos"><span class="skeleton" style="width:60px;height:32px;display:block;"></span></div>
-      <div class="kpi-sub" id="sub-acos">Ad spend / ad revenue</div>
-    </div>
-    <div class="kpi-card" id="kpi-tacos">
-      <div class="kpi-icon" style="background:rgba(234,88,12,0.1);">📊</div>
-      <div class="kpi-label">TACOS</div>
-      <div class="kpi-val orange" id="val-tacos"><span class="skeleton" style="width:60px;height:32px;display:block;"></span></div>
-      <div class="kpi-sub" id="sub-tacos">Ad spend / total revenue</div>
+    <div class="kpi-card" id="kpi-adrev" style="border-color:var(--coral);">
+      <div class="kpi-icon" style="background:rgba(226,105,79,0.12);">💵</div>
+      <div class="kpi-label">Ad-Attributed Revenue</div>
+      <div class="kpi-val" style="color:var(--coral-deep);" id="val-adrev"><span class="skeleton" style="width:80px;height:28px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-adrev">Revenue from ad clicks</div>
     </div>
     <div class="kpi-card" id="kpi-roas" style="border-color:var(--coral);">
       <div class="kpi-icon" style="background:rgba(226,105,79,0.12);">📈</div>
       <div class="kpi-label">Google Ad ROAS</div>
-      <div class="kpi-val" style="color:var(--coral-deep);" id="val-roas"><span class="skeleton" style="width:60px;height:32px;display:block;"></span></div>
+      <div class="kpi-val" style="color:var(--coral-deep);" id="val-roas"><span class="skeleton" style="width:60px;height:28px;display:block;"></span></div>
       <div class="kpi-sub" id="sub-roas">Ad revenue ÷ spend</div>
+    </div>
+    <div class="kpi-card" id="kpi-tacos">
+      <div class="kpi-icon" style="background:rgba(234,88,12,0.1);">📊</div>
+      <div class="kpi-label">TACOS</div>
+      <div class="kpi-val orange" id="val-tacos"><span class="skeleton" style="width:60px;height:28px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-tacos">Ad spend ÷ total revenue</div>
     </div>
   </div>
 
-  <!-- ROW 3b: Google Ads outcomes — Ad Revenue, Conversions, CPA, Ad AOV, Conv. Rate -->
-  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-bottom:24px;margin-top:-8px;" class="kpi-row-ads" id="adsKpiRow2">
-    <div class="kpi-card" id="kpi-adrev" style="border-color:var(--coral);">
-      <div class="kpi-icon" style="background:rgba(226,105,79,0.12);">💵</div>
-      <div class="kpi-label">Ad-Attributed Revenue</div>
-      <div class="kpi-val" style="color:var(--coral-deep);" id="val-adrev"><span class="skeleton" style="width:80px;height:32px;display:block;"></span></div>
-      <div class="kpi-sub" id="sub-adrev">Revenue from ad clicks — 30d</div>
-    </div>
-    <div class="kpi-card" id="kpi-adconv">
-      <div class="kpi-icon" style="background:rgba(22,163,74,0.1);">✅</div>
-      <div class="kpi-label">Ad Conversions</div>
-      <div class="kpi-val green" id="val-adconv"><span class="skeleton" style="width:60px;height:32px;display:block;"></span></div>
-      <div class="kpi-sub" id="sub-adconv">Ad-driven orders — 30d</div>
+  <div class="kpi-rowlabel">Efficiency &amp; Conversions</div>
+  <div class="metric-grid kpi-row-ads">
+    <div class="kpi-card" id="kpi-acos">
+      <div class="kpi-icon" style="background:rgba(124,58,237,0.1);">🎯</div>
+      <div class="kpi-label">ACOS</div>
+      <div class="kpi-val purple" id="val-acos"><span class="skeleton" style="width:60px;height:28px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-acos">Ad spend ÷ ad revenue</div>
     </div>
     <div class="kpi-card" id="kpi-cpa">
-      <div class="kpi-icon" style="background:rgba(124,58,237,0.1);">🧾</div>
+      <div class="kpi-icon" style="background:rgba(22,163,74,0.1);">🧾</div>
       <div class="kpi-label">Cost / Conversion</div>
-      <div class="kpi-val purple" id="val-cpa"><span class="skeleton" style="width:60px;height:32px;display:block;"></span></div>
+      <div class="kpi-val green" id="val-cpa"><span class="skeleton" style="width:60px;height:28px;display:block;"></span></div>
       <div class="kpi-sub" id="sub-cpa">Ad spend ÷ conversions</div>
     </div>
     <div class="kpi-card" id="kpi-adaov">
       <div class="kpi-icon" style="background:rgba(37,99,235,0.1);">📦</div>
       <div class="kpi-label">Ad AOV</div>
-      <div class="kpi-val blue" id="val-adaov"><span class="skeleton" style="width:60px;height:32px;display:block;"></span></div>
+      <div class="kpi-val blue" id="val-adaov"><span class="skeleton" style="width:60px;height:28px;display:block;"></span></div>
       <div class="kpi-sub" id="sub-adaov">Ad revenue ÷ conversions</div>
     </div>
     <div class="kpi-card" id="kpi-adcvr">
-      <div class="kpi-icon" style="background:rgba(13,148,136,0.1);">🎯</div>
+      <div class="kpi-icon" style="background:rgba(13,148,136,0.1);">✅</div>
       <div class="kpi-label">Ad Conv. Rate</div>
-      <div class="kpi-val teal" id="val-adcvr"><span class="skeleton" style="width:60px;height:32px;display:block;"></span></div>
+      <div class="kpi-val teal" id="val-adcvr"><span class="skeleton" style="width:60px;height:28px;display:block;"></span></div>
       <div class="kpi-sub" id="sub-adcvr">Conversions ÷ clicks</div>
     </div>
   </div>
@@ -1051,7 +1057,7 @@ async function loadGoogleAds() {
 
     // Google Ads not yet configured — show placeholder cards
     if (d.configured === false) {
-      ["adspend","cpc","acos","tacos","roas","adrev","adconv","cpa","adaov","adcvr"].forEach(k => {
+      ["adspend","acos","tacos","roas","adrev","cpa","adaov","adcvr"].forEach(k => {
         setKpi(k, '<span style="color:var(--muted);font-size:14px;">Not configured</span>', "");
       });
       document.getElementById("sub-adspend").textContent = "Set GOOGLE_ADS_* env vars in Netlify";
@@ -1061,8 +1067,7 @@ async function loadGoogleAds() {
     _adSpend = d.totalSpend;
     computeTacos();
 
-    setKpi("adspend", fmt$cents(d.totalSpend), `${fmtN(d.totalClicks)} clicks · ${fmtN(d.totalImpressions)} impr.`);
-    setKpi("cpc", fmt$cents(d.cpc), `CTR: ${fmtPct(d.ctr)}`);
+    setKpi("adspend", fmt$cents(d.totalSpend), `${fmtN(d.totalClicks)} clicks · CPC ${fmt$cents(d.cpc)}`);
 
     if (d.acos !== null) {
       const acosColor = d.acos > 50 ? "var(--red)" : d.acos > 30 ? "var(--orange)" : "var(--green)";
@@ -1083,18 +1088,17 @@ async function loadGoogleAds() {
     if (hasConv) {
       const nConv = Math.round(d.totalConversions);
       setKpi("adrev", fmt$cents(d.totalConversionsValue), `From ${fmtN(nConv)} conversions`);
-      setKpi("adconv", fmtN(nConv), "Ad-driven orders — 30d");
       setKpi("cpa", d.costPerConversion != null ? fmt$cents(d.costPerConversion) : "—", "Ad spend ÷ conversions");
       setKpi("adaov", d.adAov != null ? fmt$cents(d.adAov) : "—", "Ad revenue ÷ conversions");
-      setKpi("adcvr", d.convRate != null ? fmtPct(d.convRate) : "—", "Conversions ÷ clicks");
+      setKpi("adcvr", d.convRate != null ? fmtPct(d.convRate) : "—", `${fmtN(nConv)} conversions · CTR ${fmtPct(d.ctr)}`);
     } else {
-      ["adrev","adconv","cpa","adaov","adcvr"].forEach(k =>
+      ["adrev","cpa","adaov","adcvr"].forEach(k =>
         setKpi(k, '<span style="color:var(--muted);font-size:14px;">No conv. data</span>', "Enable conversion tracking"));
     }
 
   } catch (err) {
     if (loadingEl) loadingEl.textContent = "Error";
-    ["adspend","cpc","acos","tacos","roas","adrev","adconv","cpa","adaov","adcvr"].forEach(k =>
+    ["adspend","acos","tacos","roas","adrev","cpa","adaov","adcvr"].forEach(k =>
       setKpi(k, `<span style="color:var(--red);font-size:14px;">Error</span>`, "")
     );
     console.error("[google-ads]", err.message);
@@ -1173,16 +1177,6 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-
-// ─── Responsive grid fix for small screens ───────────────────────────────────
-function fixGrids() {
-  const w = window.innerWidth;
-  document.querySelectorAll(".kpi-row-1, .kpi-row-2, .kpi-row-ads").forEach(el => {
-    el.style.gridTemplateColumns = w < 640 ? "1fr 1fr" : "repeat(4,1fr)";
-  });
-}
-window.addEventListener("resize", fixGrids);
-fixGrids();
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 // Only load data if session is already active (gate is hidden)
