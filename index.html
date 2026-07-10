@@ -169,7 +169,20 @@
   .refresh-btn:disabled { opacity: 0.5; cursor: default; }
 
   /* Scrollable table wrapper */
-  .table-scroll { overflow-x: auto; }
+  .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* ── Responsive: chart/table split rows + mobile tuning ── */
+  .split-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+  .split-donut { display:grid; grid-template-columns:180px 1fr; gap:16px; align-items:center; }
+  @media (max-width:900px){ .split-2 { grid-template-columns:1fr; } }
+  @media (max-width:560px){ .split-donut { grid-template-columns:1fr; justify-items:center; text-align:center; } }
+  @media (max-width:768px){
+    .page-content { padding:20px 16px !important; }
+    .page-header  { padding:14px 16px !important; }
+    .chart-card   { padding:15px; }
+    .data-table td { white-space:nowrap; }
+    .login-box    { padding:32px 22px; }
+  }
 
   /* Live indicator */
   @keyframes pulse-dot {
@@ -298,7 +311,7 @@
 </div>
 
 <!-- Header -->
-<div style="background:var(--surface);border-bottom:1px solid var(--border);padding:16px 32px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
+<div class="page-header" style="background:var(--surface);border-bottom:1px solid var(--border);padding:16px 32px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
   <div style="display:flex;align-items:center;gap:12px;">
     <img src="https://behappybeyou.net/cdn/shop/t/31/assets/android-chrome-192x192.png" alt="BHBY" width="34" height="34" style="border-radius:8px;flex-shrink:0;">
     <div>
@@ -318,7 +331,7 @@
 <div id="tab-live">
 
 <!-- Main content -->
-<div style="padding:28px 32px;max-width:1600px;margin:0 auto;">
+<div class="page-content" style="padding:28px 32px;max-width:1600px;margin:0 auto;">
 
   <!-- Section header -->
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;">
@@ -452,7 +465,7 @@
   </div>
 
   <!-- ROW 4: Sales by SKU (bar) + AOV trend (line) -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+  <div class="split-2">
     <div class="chart-card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
         <div class="chart-title" style="margin-bottom:0;">Sales by SKU — Top 15 by Revenue</div>
@@ -476,14 +489,14 @@
   </div>
 
   <!-- ROW 5: UTM Breakdown + Inventory Warnings -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+  <div class="split-2">
     <div class="chart-card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
         <div class="chart-title" style="margin-bottom:0;">Orders by UTM Source / Channel</div>
         <span id="utm-loading" class="font-mono" style="font-size:10px;color:var(--muted);">Loading…</span>
       </div>
       <div id="utm-error" style="display:none;"></div>
-      <div style="display:grid;grid-template-columns:180px 1fr;gap:16px;align-items:center;">
+      <div class="split-donut">
         <div style="position:relative;height:180px;width:180px;">
           <canvas id="chartUtm"></canvas>
         </div>
