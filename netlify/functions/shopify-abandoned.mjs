@@ -5,6 +5,7 @@
  */
 
 import { verifyToken } from "./_auth-verify.mjs";
+import { parseRange } from "./_range.mjs";
 
 /*
  * Requires the read_checkouts scope.
@@ -114,12 +115,8 @@ async function shopifyGraphQL(token, query, variables = {}) {
   return { data: json.data, cost: json.extensions?.cost };
 }
 
-async function fetchAllAbandoned(token) {
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-    .toISOString()
-    .split("T")[0];
-
-  const sinceFilter = `created_at:>=${since}`;
+async function fetchAllAbandoned(token, start, endExclusive) {
+  const sinceFilter = `created_at:>=${start} created_at:<${endExclusive}`;
   const allCheckouts = [];
   let cursor = null;
 
@@ -267,8 +264,22 @@ export default async function handler(req, context) {
   }
 
   try {
-    const checkouts = await fetchAllAbandoned(token);
-    const result = processAbandoned(checkouts);
+    const range = parseRange(req);
+    const result = processAbandoned(await fetchAllAbandoned(token, range.start, range.endExclusive));
+    result.range = { start: range.start, end: range.end };
+    result.windowDays = range.days;
+
+    if (range.prev) {
+      const p = processAbandoned(await fetchAllAbandoned(token, range.prev.start, range.prev.endExclusive));
+      result.previous = {
+        range: { start: range.prev.start, end: range.prev.end },
+        abandonmentRate: p.abandonmentRate,
+        abandoned: p.abandoned,
+        totalAbandonedValue: p.totalAbandonedValue,
+        suspectedBots: p.suspectedBots,
+      };
+    }
+
     return new Response(JSON.stringify(result), { status: 200, headers: corsHeaders });
   } catch (err) {
     console.error("[shopify-abandoned]", err);

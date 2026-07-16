@@ -7,6 +7,7 @@
  */
 
 import { verifyToken } from "./_auth-verify.mjs";
+import { parseRange } from "./_range.mjs";
 
 const STORE = "behappybeyou1.myshopify.com";
 const API_VERSION = "2026-01";
@@ -34,7 +35,7 @@ const ORDERS_QUERY = `
     orders(
       first: 250
       after: $cursor
-      query: "created_at:>={{ since }} financial_status:paid"
+      query: "created_at:>={{ start }} created_at:<{{ endExclusive }} financial_status:paid"
       sortKey: CREATED_AT
     ) {
       pageInfo {
@@ -105,12 +106,10 @@ async function shopifyGraphQL(token, query, variables = {}) {
   return { data: json.data, cost: json.extensions?.cost };
 }
 
-async function fetchAllOrders(token) {
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-    .toISOString()
-    .split("T")[0];
-
-  const query = ORDERS_QUERY.replace("{{ since }}", since);
+async function fetchAllOrders(token, start, endExclusive) {
+  const query = ORDERS_QUERY
+    .replace("{{ start }}", start)
+    .replace("{{ endExclusive }}", endExclusive);
   const allOrders = [];
   let cursor = null;
   let page = 0;
@@ -291,8 +290,26 @@ export default async function handler(req, context) {
   }
 
   try {
-    const orders = await fetchAllOrders(token);
-    const result = processOrders(orders);
+    const range = parseRange(req);
+    const result = processOrders(await fetchAllOrders(token, range.start, range.endExclusive));
+    result.range = { start: range.start, end: range.end };
+    result.windowDays = range.days;
+
+    // Previous equal-length window, for delta comparison. Only the scalar KPIs
+    // are needed downstream, so return a compact summary (not the full payload).
+    if (range.prev) {
+      const p = processOrders(await fetchAllOrders(token, range.prev.start, range.prev.endExclusive));
+      result.previous = {
+        range: { start: range.prev.start, end: range.prev.end },
+        totalRevenue: p.totalRevenue,
+        totalOrders: p.totalOrders,
+        totalUnitsSold: p.totalUnitsSold,
+        aovOverall: p.aovOverall,
+        totalShipping: p.totalShipping,
+        newVsReturning: p.newVsReturning,
+      };
+    }
+
     return new Response(JSON.stringify(result), { status: 200, headers: corsHeaders });
   } catch (err) {
     console.error("[shopify-orders]", err);

@@ -182,6 +182,16 @@
   .table-scroll { max-width: 100%; }
   .chart-card canvas { max-width: 100% !important; }
   body { overflow-x: hidden; }
+  /* Date range switcher */
+  .date-switcher { display:inline-flex; gap:2px; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:3px; flex-wrap:wrap; }
+  .date-switcher button { font-family:'DM Mono',monospace; font-size:11px; letter-spacing:0.03em; color:var(--muted); background:none; border:none; padding:5px 10px; border-radius:6px; cursor:pointer; white-space:nowrap; transition:background .15s,color .15s; }
+  .date-switcher button:hover { color:var(--text); }
+  .date-switcher button.active { background:var(--coral); color:#fff; font-weight:500; }
+  /* Delta chip (period-over-period) shown under each KPI value */
+  .kpi-delta { display:inline-flex; align-items:center; gap:4px; font-family:'DM Mono',monospace; font-size:11px; font-weight:500; margin-top:4px; line-height:1.2; }
+  .kpi-delta .vs { color:var(--muted); font-weight:400; }
+  .kpi-delta.flat { color:var(--muted); }
+  @media (max-width:560px){ .date-switcher button { padding:5px 8px; font-size:10px; } }
   @media (max-width:900px){ .split-2 { grid-template-columns:1fr; } }
   @media (max-width:560px){ .split-donut { grid-template-columns:1fr; justify-items:center; text-align:center; } }
   @media (max-width:768px){
@@ -331,6 +341,13 @@
     </div>
   </div>
   <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+    <div class="date-switcher" id="dateSwitcher" role="group" aria-label="Date range">
+      <button data-range="today" onclick="setRange('today')">Today</button>
+      <button data-range="yesterday" onclick="setRange('yesterday')">Yesterday</button>
+      <button data-range="7d" onclick="setRange('7d')">7 days</button>
+      <button data-range="14d" onclick="setRange('14d')">14 days</button>
+      <button data-range="30d" class="active" onclick="setRange('30d')">30 days</button>
+    </div>
     <span id="lastRefreshed" class="font-mono" style="font-size:11px;color:var(--muted);">—</span>
     <span id="nextRefresh" class="font-mono" style="font-size:11px;color:var(--muted);" title="Auto-refresh every 5 min">—</span>
     <button class="refresh-btn" id="globalRefresh" onclick="loadAll()">&#8635; Refresh All</button>
@@ -348,6 +365,7 @@
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;">
     <span class="live-dot"></span>
     <span class="font-mono" style="font-size:11px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;">Live Data — behappybeyou.net</span>
+    <span class="font-mono" id="range-label" style="font-size:10px;color:var(--coral-deep);font-weight:500;letter-spacing:0.04em;">Last 30 days</span>
     <span class="font-mono" id="excluded-note" style="font-size:10px;color:var(--muted);letter-spacing:0.04em;">Excludes free samples &amp; test orders</span>
   </div>
 
@@ -489,7 +507,7 @@
     </div>
     <div class="chart-card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-        <div class="chart-title" style="margin-bottom:0;">AOV Over Time — Daily (30d)</div>
+        <div class="chart-title" id="aov-chart-title" style="margin-bottom:0;">AOV Over Time — Daily (30d)</div>
         <span id="aov-loading" class="font-mono" style="font-size:10px;color:var(--muted);">Loading…</span>
       </div>
       <div id="aov-error" style="display:none;"></div>
@@ -560,7 +578,7 @@
   <!-- ROW 6: Abandoned Checkout Table -->
   <div class="chart-card" style="margin-bottom:16px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-      <div class="chart-title" style="margin-bottom:0;">Recent Abandoned Checkouts — Last 30 Days</div>
+      <div class="chart-title" id="abandoned-chart-title" style="margin-bottom:0;">Recent Abandoned Checkouts — Last 30 Days</div>
       <span id="abandoned-loading" class="font-mono" style="font-size:10px;color:var(--muted);">Loading…</span>
     </div>
     <div id="abandoned-botnote" class="font-mono" style="font-size:10px;color:var(--muted);margin-bottom:10px;"></div>
@@ -584,6 +602,57 @@
     </div>
   </div>
 
+  <!-- ROW 7: Email performance (Klaviyo) -->
+  <div class="kpi-rowlabel" style="margin-top:6px;">Email — Klaviyo <span id="klaviyo-loading" class="font-mono" style="font-size:10px;color:var(--muted);font-weight:400;letter-spacing:0;text-transform:none;margin-left:8px;">Loading—</span></div>
+  <div class="metric-grid kpi-row-klaviyo">
+    <div class="kpi-card" id="kpi-email-rev">
+      <div class="kpi-icon" style="background:rgba(232,148,120,0.14);">✉️</div>
+      <div class="kpi-label">Email Revenue</div>
+      <div class="kpi-val gold" id="val-email-rev"><span class="skeleton" style="width:90px;height:32px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-email-rev">Flows + campaigns</div>
+    </div>
+    <div class="kpi-card" id="kpi-flow-rev">
+      <div class="kpi-icon" style="background:rgba(13,148,136,0.1);">🔁</div>
+      <div class="kpi-label">Flow Revenue</div>
+      <div class="kpi-val teal" id="val-flow-rev"><span class="skeleton" style="width:90px;height:32px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-flow-rev">Automated flows</div>
+    </div>
+    <div class="kpi-card" id="kpi-campaign-rev">
+      <div class="kpi-icon" style="background:rgba(124,58,237,0.1);">📣</div>
+      <div class="kpi-label">Campaign Revenue</div>
+      <div class="kpi-val purple" id="val-campaign-rev"><span class="skeleton" style="width:90px;height:32px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-campaign-rev">One-time sends</div>
+    </div>
+    <div class="kpi-card" id="kpi-email-recip">
+      <div class="kpi-icon" style="background:rgba(37,99,235,0.1);">👥</div>
+      <div class="kpi-label">Emails Sent</div>
+      <div class="kpi-val blue" id="val-email-recip"><span class="skeleton" style="width:90px;height:32px;display:block;"></span></div>
+      <div class="kpi-sub" id="sub-email-recip">Recipients</div>
+    </div>
+  </div>
+  <div id="klaviyo-archivednote" class="font-mono" style="font-size:10px;color:var(--muted);margin:-4px 0 12px;"></div>
+  <div id="klaviyo-error" style="display:none;"></div>
+  <div class="split-2">
+    <div class="chart-card">
+      <div class="chart-title" style="margin-bottom:14px;">Flow Performance</div>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Flow</th><th>Status</th><th>Sent</th><th>Open</th><th>Click</th><th>Conv</th><th>Revenue</th></tr></thead>
+          <tbody id="flowsTableBody"><tr><td colspan="7" style="padding:16px;text-align:center;color:var(--muted);">Loading—</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title" style="margin-bottom:14px;">Campaign Performance</div>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Campaign</th><th>Sent</th><th>Recipients</th><th>Open</th><th>Click</th><th>Revenue</th></tr></thead>
+          <tbody id="campaignsTableBody"><tr><td colspan="6" style="padding:16px;text-align:center;color:var(--muted);">Loading—</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
 </div><!-- end main content -->
 </div><!-- end tab-live -->
 
@@ -604,6 +673,71 @@ const PALETTE = [
 const BASE = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
   ? "http://localhost:8888"
   : "";
+
+// ─── Date range switcher (period + auto previous-period comparison) ──────────
+const PRESETS = { today:{label:"Today"}, yesterday:{label:"Yesterday"}, "7d":{label:"Last 7 days"}, "14d":{label:"Last 14 days"}, "30d":{label:"Last 30 days"} };
+let _rangePreset = localStorage.getItem("bhby_dash_range") || "30d";
+if (!PRESETS[_rangePreset]) _rangePreset = "30d";
+let _prevAdSpend = null, _prevTotalRevenue = null;
+
+function _isoLocal(d) {
+  // YYYY-MM-DD in the browser's local timezone (avoids UTC off-by-one at midnight).
+  const z = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return z.toISOString().split("T")[0];
+}
+function computeRange(preset) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  let start, end, days;
+  if (preset === "today") { start = new Date(today); end = new Date(today); days = 1; }
+  else if (preset === "yesterday") { const y = new Date(today); y.setDate(y.getDate()-1); start = new Date(y); end = new Date(y); days = 1; }
+  else { days = preset === "7d" ? 7 : preset === "14d" ? 14 : 30; end = new Date(today); start = new Date(today); start.setDate(start.getDate()-(days-1)); }
+  const prevEnd = new Date(start); prevEnd.setDate(prevEnd.getDate()-1);
+  const prevStart = new Date(prevEnd); prevStart.setDate(prevStart.getDate()-(days-1));
+  return { start:_isoLocal(start), end:_isoLocal(end), prevStart:_isoLocal(prevStart), prevEnd:_isoLocal(prevEnd), days, label:PRESETS[preset].label };
+}
+function rangeQS() {
+  const r = computeRange(_rangePreset);
+  return `start=${r.start}&end=${r.end}&prevStart=${r.prevStart}&prevEnd=${r.prevEnd}`;
+}
+function setRange(preset) {
+  if (!PRESETS[preset] || preset === _rangePreset) { if (PRESETS[preset]) loadAll(); return; }
+  _rangePreset = preset;
+  localStorage.setItem("bhby_dash_range", preset);
+  renderSwitcherUI();
+  loadAll();
+}
+function renderSwitcherUI() {
+  document.querySelectorAll("#dateSwitcher button").forEach(b => b.classList.toggle("active", b.dataset.range === _rangePreset));
+  const r = computeRange(_rangePreset);
+  const el = document.getElementById("range-label");
+  if (el) el.textContent = r.days === 1 ? `${r.label} (${r.start})` : `${r.label} (${r.start} to ${r.end})`;
+  const aovT = document.getElementById("aov-chart-title");
+  if (aovT) aovT.textContent = `AOV Over Time \u2014 Daily (${r.days}d)`;
+  const abT = document.getElementById("abandoned-chart-title");
+  if (abT) abT.textContent = `Recent Abandoned Checkouts \u2014 ${r.label}`;
+}
+
+// Period-over-period delta chip, rendered just under a KPI value.
+function setDelta(id, cur, prev, goodUp = true) {
+  const valEl = document.getElementById("val-" + id);
+  if (!valEl) return;
+  let chip = document.getElementById("delta-" + id);
+  if (!chip) { chip = document.createElement("div"); chip.className = "kpi-delta"; chip.id = "delta-" + id; valEl.insertAdjacentElement("afterend", chip); }
+  if (cur == null || prev == null) { chip.style.display = "none"; return; }
+  chip.style.display = "";
+  if (prev === 0) {
+    chip.className = "kpi-delta flat"; chip.style.color = "";
+    chip.innerHTML = cur === 0 ? `<span>no change</span> <span class="vs">vs prev</span>` : `<span>new vs 0</span> <span class="vs">prev</span>`;
+    return;
+  }
+  const pct = (cur - prev) / Math.abs(prev) * 100;
+  const flat = Math.abs(pct) < 0.05;
+  const up = pct >= 0;
+  chip.className = "kpi-delta" + (flat ? " flat" : "");
+  chip.style.color = flat ? "" : (up === goodUp ? "var(--green)" : "var(--red)");
+  const arrow = flat ? "=" : up ? "\u25B2" : "\u25BC";
+  chip.innerHTML = `${arrow} ${Math.abs(pct).toFixed(Math.abs(pct) >= 100 ? 0 : 1)}% <span class="vs">vs prev</span>`;
+}
 
 // ─── Auth & session ───────────────────────────────────────────────────────────
 const SESSION_KEY = "bhby_dash_token";
@@ -768,10 +902,10 @@ async function loadOrders() {
   clearError("utm");
 
   try {
-    const d = await fetchData("shopify-orders");
+    const d = await fetchData("shopify-orders?" + rangeQS());
 
     // KPI row 1
-    setKpi("revenue", fmt$(d.totalRevenue));
+    setKpi("revenue", fmt$(d.totalRevenue), computeRange(_rangePreset).label);
     _totalRevenue = d.totalRevenue;
     computeTacos();
     setKpi("aov", fmt$cents(d.aovOverall));
@@ -792,6 +926,17 @@ async function loadOrders() {
     const retPct = total > 0 ? Math.round(d.newVsReturning.returning / total * 100) : 0;
     setKpi("new", fmtN(d.newVsReturning.new), `${newPct}% of all orders`);
     setKpi("returning", fmtN(d.newVsReturning.returning), `${retPct}% of all orders`);
+
+    // Period-over-period deltas (vs the immediately-preceding equal-length window)
+    const pv = d.previous;
+    setDelta("revenue",   d.totalRevenue,            pv?.totalRevenue,            true);
+    setDelta("aov",       d.aovOverall,              pv?.aovOverall,              true);
+    setDelta("shipping",  d.totalShipping,           pv?.totalShipping,           true);
+    setDelta("orders",    d.totalOrders,             pv?.totalOrders,             true);
+    setDelta("new",       d.newVsReturning.new,      pv?.newVsReturning?.new,     true);
+    setDelta("returning", d.newVsReturning.returning,pv?.newVsReturning?.returning,true);
+    _prevTotalRevenue = pv?.totalRevenue ?? null;
+    computeTacos();
 
     // ── SKU bar chart ──
     setLoadingDone("sku");
@@ -1027,12 +1172,14 @@ async function loadAbandoned() {
   document.getElementById("abandoned-loading").textContent = "Loading…";
 
   try {
-    const d = await fetchData("shopify-abandoned");
+    const d = await fetchData("shopify-abandoned?" + rangeQS());
     setLoadingDone("abandoned");
 
     // KPIs
     setKpi("abandonment", fmtPct(d.abandonmentRate), `${fmtPct(100 - d.abandonmentRate)} recovered`);
     setKpi("abandoned-value", fmt$cents(d.totalAbandonedValue), `${fmtN(d.abandoned)} real carts · bots excluded`);
+    setDelta("abandonment", d.abandonmentRate, d.previous?.abandonmentRate, false);
+    setDelta("abandoned-value", d.totalAbandonedValue, d.previous?.totalAbandonedValue, false);
     const abNote = document.getElementById("abandoned-botnote");
     if (abNote) abNote.textContent = d.suspectedBots > 0
       ? `Hiding ${fmtN(d.suspectedBots)} suspected bot / test checkouts ($${fmtN(d.suspectedBotValue)}) — "name+digits@free-mail" card-testing pattern`
@@ -1073,6 +1220,9 @@ function computeTacos() {
   if (_adSpend != null && _totalRevenue != null && _totalRevenue > 0) {
     const tacos = (_adSpend / _totalRevenue) * 100;
     setKpi("tacos", fmtPct(tacos), "Ad spend / total revenue");
+    if (_prevAdSpend != null && _prevTotalRevenue != null && _prevTotalRevenue > 0) {
+      setDelta("tacos", tacos, (_prevAdSpend / _prevTotalRevenue) * 100, false);
+    }
   }
 }
 
@@ -1081,7 +1231,7 @@ async function loadGoogleAds() {
   if (loadingEl) loadingEl.textContent = "Loading…";
 
   try {
-    const d = await fetchData("google-ads");
+    const d = await fetchData("google-ads?" + rangeQS());
     if (loadingEl) loadingEl.textContent = "";
 
     // Google Ads not yet configured — show placeholder cards
@@ -1125,12 +1275,91 @@ async function loadGoogleAds() {
         setKpi(k, '<span style="color:var(--muted);font-size:14px;">No conv. data</span>', "Enable conversion tracking"));
     }
 
+    // Period-over-period deltas
+    const gp = d.previous;
+    setDelta("adspend", d.totalSpend,             gp?.totalSpend,             false);
+    setDelta("roas",    d.roas,                   gp?.roas,                   true);
+    setDelta("acos",    d.acos,                   gp?.acos,                   false);
+    setDelta("adrev",   d.totalConversionsValue,  gp?.totalConversionsValue,  true);
+    setDelta("cpa",     d.costPerConversion,      gp?.costPerConversion,      false);
+    setDelta("adaov",   d.adAov,                  gp?.adAov,                  true);
+    setDelta("adcvr",   d.convRate,               gp?.convRate,               true);
+    _prevAdSpend = gp?.totalSpend ?? null;
+    computeTacos();
+
   } catch (err) {
     if (loadingEl) loadingEl.textContent = "Error";
     ["adspend","acos","tacos","roas","adrev","cpa","adaov","adcvr"].forEach(k =>
       setKpi(k, `<span style="color:var(--red);font-size:14px;">Error</span>`, "")
     );
     console.error("[google-ads]", err.message);
+  }
+}
+
+// ─── Render: Klaviyo email (flows + campaigns) ───────────────────────────────
+async function loadKlaviyo() {
+  const loadingEl = document.getElementById("klaviyo-loading");
+  if (loadingEl) loadingEl.textContent = "Loading…";
+  clearError("klaviyo");
+  const fb = document.getElementById("flowsTableBody");
+  const cb = document.getElementById("campaignsTableBody");
+  try {
+    const d = await fetchData("klaviyo?" + rangeQS() + "&compare=0");
+    if (loadingEl) loadingEl.textContent = "";
+
+    if (d.configured === false) {
+      ["email-rev","flow-rev","campaign-rev","email-recip"].forEach(k =>
+        setKpi(k, '<span style="color:var(--muted);font-size:14px;">Not configured</span>', ""));
+      document.getElementById("sub-email-rev").textContent = "Set KLAVIYO_API_KEY in Netlify";
+      fb.innerHTML = '<tr><td colspan="7" style="padding:16px;text-align:center;color:var(--muted);">Klaviyo not configured</td></tr>';
+      cb.innerHTML = '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--muted);">Klaviyo not configured</td></tr>';
+      return;
+    }
+
+    const t = d.totals;
+    setKpi("email-rev", fmt$cents(t.emailRevenue), "Flows + campaigns");
+    setKpi("flow-rev", fmt$cents(t.flowRevenue), `${fmtN(Math.round(t.flowConversions))} conversions`);
+    setKpi("campaign-rev", fmt$cents(t.campaignRevenue), `${fmtN(Math.round(t.campaignConversions))} conversions`);
+    setKpi("email-recip", fmtN(t.recipients), `Open ${fmtPct(d.flowTotals.openRate)} · Click ${fmtPct(d.flowTotals.clickRate)} (flows)`);
+    const an = document.getElementById("klaviyo-archivednote");
+    if (an) {
+      const ax = d.archivedExcluded || { flows: 0, campaigns: 0, revenue: 0 };
+      const n = (ax.flows || 0) + (ax.campaigns || 0);
+      an.textContent = n > 0
+        ? `Excludes ${n} archived ${n === 1 ? "automation" : "automations"} (${fmt$cents(ax.revenue || 0)} attributed) \u2014 active email program only`
+        : "Active flows & campaigns \u2014 attributed to Placed Order";
+    }
+
+    const statusCell = (s) => {
+      const color = s === "live" ? "var(--green)" : s === "draft" ? "var(--orange)" : "var(--muted)";
+      return `<td style="font-size:11px;color:${color};text-transform:capitalize;">${escHtml(s || "—")}</td>`;
+    };
+    fb.innerHTML = (d.flows && d.flows.length) ? d.flows.map(f => `
+      <tr>
+        <td>${escHtml(f.name)}</td>
+        ${statusCell(f.status)}
+        <td class="font-mono">${fmtN(f.recipients)}</td>
+        <td class="font-mono">${fmtPct(f.openRate)}</td>
+        <td class="font-mono">${fmtPct(f.clickRate)}</td>
+        <td class="font-mono">${fmtN(Math.round(f.conversions))}</td>
+        <td class="font-mono"><strong>${fmt$cents(f.revenue)}</strong></td>
+      </tr>`).join("") : '<tr><td colspan="7" style="padding:16px;text-align:center;color:var(--muted);">No flow activity in this window</td></tr>';
+
+    cb.innerHTML = (d.campaigns && d.campaigns.length) ? d.campaigns.map(c => `
+      <tr>
+        <td>${escHtml(c.name)}</td>
+        <td class="font-mono" style="font-size:11px;">${c.sendTime ? fmtDate(c.sendTime) : "—"}</td>
+        <td class="font-mono">${fmtN(c.recipients)}</td>
+        <td class="font-mono">${fmtPct(c.openRate)}</td>
+        <td class="font-mono">${fmtPct(c.clickRate)}</td>
+        <td class="font-mono"><strong>${fmt$cents(c.revenue)}</strong></td>
+      </tr>`).join("") : '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--muted);">No campaigns sent in this window</td></tr>';
+  } catch (err) {
+    if (loadingEl) loadingEl.textContent = "Error";
+    showError("klaviyo", err.message);
+    ["email-rev","flow-rev","campaign-rev","email-recip"].forEach(k =>
+      setKpi(k, '<span style="color:var(--red);font-size:14px;">Error</span>', ""));
+    console.error("[klaviyo]", err.message);
   }
 }
 
@@ -1153,6 +1382,7 @@ async function loadAll() {
     loadInventory(),
     loadAbandoned(),
     loadGoogleAds(),
+    loadKlaviyo(),
   ]);
 
 
@@ -1208,6 +1438,7 @@ document.addEventListener("visibilitychange", () => {
 
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
+renderSwitcherUI();
 // Only load data if session is already active (gate is hidden)
 if (getToken()) {
   loadAll();

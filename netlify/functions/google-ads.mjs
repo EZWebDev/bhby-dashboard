@@ -22,6 +22,7 @@
  */
 
 import { verifyToken } from "./_auth-verify.mjs";
+import { parseRange } from "./_range.mjs";
 
 const GOOGLE_ADS_API_VERSION = "v21";
 // The account sums 2 Primary "Purchase" conversion actions (Shopify + GA4), ~1.8x
@@ -165,6 +166,60 @@ function processRows(rows) {
   };
 }
 
+// ─── Compute all ad metrics for one date window [start, end] (inclusive) ─────
+async function computeAdMetrics(accessToken, devToken, customerId, loginCustomerId, start, end) {
+  const dateFilter = `segments.date BETWEEN '${start}' AND '${end}'`;
+
+  const rows = await queryGoogleAds(accessToken, devToken, customerId, loginCustomerId, `
+    SELECT segments.date, metrics.cost_micros, metrics.clicks, metrics.impressions,
+           metrics.conversions, metrics.conversions_value
+    FROM campaign WHERE ${dateFilter} ORDER BY segments.date ASC
+  `);
+  const result = processRows(rows);
+
+  // De-double conversion value: segment by conversion action and keep only the
+  // primary one, so ACOS + ROAS reflect real (non-double-counted) ad revenue.
+  try {
+    const convRows = await queryGoogleAds(accessToken, devToken, customerId, loginCustomerId,
+      `SELECT segments.conversion_action_name, metrics.conversions, metrics.conversions_value
+       FROM campaign WHERE ${dateFilter}`);
+    let keptVal = 0, keptConv = 0;
+    const seen = new Set();
+    for (const r of convRows) {
+      const name = r.segments?.conversionActionName || "";
+      seen.add(name);
+      if (name === PRIMARY_CONVERSION_ACTION) {
+        keptVal += Number(r.metrics?.conversionsValue || 0);
+        keptConv += Number(r.metrics?.conversions || 0);
+      }
+    }
+    if (seen.has(PRIMARY_CONVERSION_ACTION)) {
+      result.totalConversionsValue = Math.round(keptVal * 100) / 100;
+      result.totalConversions = Math.round(keptConv * 100) / 100;
+      result.acos = keptVal > 0 ? Math.round((result.totalSpend / keptVal) * 10000) / 100 : null;
+    }
+    result.conversionAction = PRIMARY_CONVERSION_ACTION;
+    result.conversionActionsSeen = Array.from(seen);
+  } catch (e) {
+    result.conversionActionError = e.message;
+  }
+
+  result.roas = (result.totalConversionsValue > 0 && result.totalSpend > 0)
+    ? Math.round((result.totalConversionsValue / result.totalSpend) * 100) / 100
+    : null;
+  result.costPerConversion = result.totalConversions > 0
+    ? Math.round((result.totalSpend / result.totalConversions) * 100) / 100
+    : null;
+  result.adAov = result.totalConversions > 0
+    ? Math.round((result.totalConversionsValue / result.totalConversions) * 100) / 100
+    : null;
+  result.convRate = result.totalClicks > 0
+    ? Math.round((result.totalConversions / result.totalClicks) * 10000) / 100
+    : null;
+
+  return result;
+}
+
 // ─── Handler ──────────────────────────────────────────────────────────────────
 export default async function handler(req) {
   if (req.method === "OPTIONS") {
@@ -195,69 +250,28 @@ export default async function handler(req) {
 
   try {
     const accessToken = await getAccessToken(clientId, clientSecret, refreshToken);
+    const range = parseRange(req);
 
-    // Query: daily performance for last 30 days across all campaigns
-    const gaql = `
-      SELECT
-        segments.date,
-        metrics.cost_micros,
-        metrics.clicks,
-        metrics.impressions,
-        metrics.conversions,
-        metrics.conversions_value
-      FROM campaign
-      WHERE segments.date DURING LAST_30_DAYS
-      ORDER BY segments.date ASC
-    `;
+    const result = await computeAdMetrics(accessToken, devToken, customerId, loginCustomerId, range.start, range.end);
+    result.range = { start: range.start, end: range.end };
+    result.windowDays = range.days;
 
-    const rows = await queryGoogleAds(accessToken, devToken, customerId, loginCustomerId, gaql);
-    const result = processRows(rows);
-
-    // De-double conversion value: segment by conversion action and keep only the
-    // primary one, so ACOS + ROAS reflect real (non-double-counted) ad revenue.
-    try {
-      const convRows = await queryGoogleAds(accessToken, devToken, customerId, loginCustomerId,
-        `SELECT segments.conversion_action_name, metrics.conversions, metrics.conversions_value
-         FROM campaign WHERE segments.date DURING LAST_30_DAYS`);
-      let keptVal = 0, keptConv = 0;
-      const seen = new Set();
-      for (const r of convRows) {
-        const name = r.segments?.conversionActionName || "";
-        seen.add(name);
-        if (name === PRIMARY_CONVERSION_ACTION) {
-          keptVal += Number(r.metrics?.conversionsValue || 0);
-          keptConv += Number(r.metrics?.conversions || 0);
-        }
-      }
-      // Only override if the named action exists (else keep the summed value as-is)
-      if (seen.has(PRIMARY_CONVERSION_ACTION)) {
-        result.totalConversionsValue = Math.round(keptVal * 100) / 100;
-        result.totalConversions = Math.round(keptConv * 100) / 100;
-        result.acos = keptVal > 0 ? Math.round((result.totalSpend / keptVal) * 10000) / 100 : null;
-      }
-      result.conversionAction = PRIMARY_CONVERSION_ACTION;
-      result.conversionActionsSeen = Array.from(seen);
-    } catch (e) {
-      result.conversionActionError = e.message; // fall back to the summed value
+    if (range.prev) {
+      const p = await computeAdMetrics(accessToken, devToken, customerId, loginCustomerId, range.prev.start, range.prev.end);
+      result.previous = {
+        range: { start: range.prev.start, end: range.prev.end },
+        totalSpend: p.totalSpend,
+        totalClicks: p.totalClicks,
+        totalConversions: p.totalConversions,
+        totalConversionsValue: p.totalConversionsValue,
+        roas: p.roas,
+        acos: p.acos,
+        costPerConversion: p.costPerConversion,
+        adAov: p.adAov,
+        convRate: p.convRate,
+        cpc: p.cpc,
+      };
     }
-
-    // True channel ROAS = ad revenue / ad spend
-    result.roas = (result.totalConversionsValue > 0 && result.totalSpend > 0)
-      ? Math.round((result.totalConversionsValue / result.totalSpend) * 100) / 100
-      : null;
-
-    // Outcome metrics derived from the (de-doubled) conversion figures.
-    // costPerConversion = CPA; adAov = revenue per ad-driven order;
-    // convRate = ad-driven conversions per click.
-    result.costPerConversion = result.totalConversions > 0
-      ? Math.round((result.totalSpend / result.totalConversions) * 100) / 100
-      : null;
-    result.adAov = result.totalConversions > 0
-      ? Math.round((result.totalConversionsValue / result.totalConversions) * 100) / 100
-      : null;
-    result.convRate = result.totalClicks > 0
-      ? Math.round((result.totalConversions / result.totalClicks) * 10000) / 100
-      : null;
 
     return new Response(JSON.stringify(result), { status: 200, headers: CORS });
   } catch (err) {
