@@ -7,7 +7,7 @@
  */
 
 import { verifyToken } from "./_auth-verify.mjs";
-import { parseRange } from "./_range.mjs";
+import { parseRange, zonedMidnightISO, SHOP_TIME_ZONE, ADS_TIME_ZONE } from "./_range.mjs";
 
 const STORE = "behappybeyou1.myshopify.com";
 const API_VERSION = "2026-01";
@@ -35,7 +35,7 @@ const ORDERS_QUERY = `
     orders(
       first: 250
       after: $cursor
-      query: "created_at:>={{ start }} created_at:<{{ endExclusive }} financial_status:paid"
+      query: "created_at:>='{{ start }}' created_at:<'{{ endExclusive }}' financial_status:paid"
       sortKey: CREATED_AT
     ) {
       pageInfo {
@@ -106,10 +106,19 @@ async function shopifyGraphQL(token, query, variables = {}) {
   return { data: json.data, cost: json.extensions?.cost };
 }
 
+/**
+ * Fetch every paid order overlapping BOTH the shop-timezone window and the
+ * Google-Ads-timezone window for the same calendar dates.
+ *
+ * Shop midnight (ET) is the EARLIER instant and ads midnight (PT) the LATER
+ * one, so [shopStart, adsEnd) is the union of the two windows — one fetch
+ * covers both and callers bucket in JS. Bare dates were previously resolved
+ * implicitly in the shop timezone; the bounds are now explicit and DST-correct.
+ */
 async function fetchAllOrders(token, start, endExclusive) {
   const query = ORDERS_QUERY
-    .replace("{{ start }}", start)
-    .replace("{{ endExclusive }}", endExclusive);
+    .replace("{{ start }}", zonedMidnightISO(start, SHOP_TIME_ZONE))
+    .replace("{{ endExclusive }}", zonedMidnightISO(endExclusive, ADS_TIME_ZONE));
   const allOrders = [];
   let cursor = null;
   let page = 0;
@@ -138,6 +147,28 @@ async function fetchAllOrders(token, start, endExclusive) {
   }
 
   return allOrders;
+}
+
+/** Orders whose createdAt falls in [startISO, endISO) — both offset-anchored. */
+function windowOrders(orders, startISO, endISO) {
+  const s = new Date(startISO).getTime();
+  const e = new Date(endISO).getTime();
+  return orders.filter((o) => {
+    const t = new Date(o.createdAt).getTime();
+    return t >= s && t < e;
+  });
+}
+
+/** Revenue + order count for an arbitrary window, applying the same tag exclusion. */
+function windowTotals(orders) {
+  let revenue = 0;
+  let count = 0;
+  for (const order of orders) {
+    if (orderExcludeReason(order)) continue;
+    revenue += parseFloat(order.totalPriceSet?.shopMoney?.amount || 0);
+    count++;
+  }
+  return { revenue: Math.round(revenue * 100) / 100, orders: count };
 }
 
 function processOrders(allOrders) {
@@ -291,14 +322,39 @@ export default async function handler(req, context) {
 
   try {
     const range = parseRange(req);
-    const result = processOrders(await fetchAllOrders(token, range.start, range.endExclusive));
+    const fetched = await fetchAllOrders(token, range.start, range.endExclusive);
+
+    // Store KPIs stay bucketed on SHOP time so they keep matching Shopify admin.
+    const result = processOrders(windowOrders(
+      fetched,
+      zonedMidnightISO(range.start, SHOP_TIME_ZONE),
+      zonedMidnightISO(range.endExclusive, SHOP_TIME_ZONE)
+    ));
     result.range = { start: range.start, end: range.end };
     result.windowDays = range.days;
+    result.timeZone = SHOP_TIME_ZONE;
+
+    // Like-for-like figure for the ads section: same calendar dates, bucketed on
+    // the Google Ads account timezone so revenue and ad spend cover the same
+    // instants. Google cannot report Eastern days (account TZ is immutable), so
+    // the alignment has to happen on this side.
+    result.adWindow = {
+      timeZone: ADS_TIME_ZONE,
+      ...windowTotals(windowOrders(
+        fetched,
+        zonedMidnightISO(range.start, ADS_TIME_ZONE),
+        zonedMidnightISO(range.endExclusive, ADS_TIME_ZONE)
+      )),
+    };
 
     // Previous equal-length window, for delta comparison. Only the scalar KPIs
     // are needed downstream, so return a compact summary (not the full payload).
     if (range.prev) {
-      const p = processOrders(await fetchAllOrders(token, range.prev.start, range.prev.endExclusive));
+      const p = processOrders(windowOrders(
+        await fetchAllOrders(token, range.prev.start, range.prev.endExclusive),
+        zonedMidnightISO(range.prev.start, SHOP_TIME_ZONE),
+        zonedMidnightISO(range.prev.endExclusive, SHOP_TIME_ZONE)
+      ));
       result.previous = {
         range: { start: range.prev.start, end: range.prev.end },
         totalRevenue: p.totalRevenue,

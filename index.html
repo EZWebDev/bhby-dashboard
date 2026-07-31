@@ -437,6 +437,8 @@
     <span class="font-mono" style="font-size:11px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;">Google Ads Performance</span>
     <span id="ads-loading" class="font-mono" style="font-size:10px;color:var(--muted);">Loading…</span>
   </div>
+  <div id="ads-tz-note" style="display:none;font-size:11px;line-height:1.5;color:var(--muted);margin:-6px 0 12px;"></div>
+  <div id="ads-conv-warn" style="display:none;font-size:11px;line-height:1.5;color:var(--red);border:1px solid var(--red);border-radius:6px;padding:8px 10px;margin:0 0 12px;"></div>
   <div class="kpi-rowlabel">Spend &amp; Return</div>
   <div class="metric-grid kpi-row-ads">
     <div class="kpi-card" id="kpi-adspend">
@@ -907,6 +909,9 @@ async function loadOrders() {
     // KPI row 1
     setKpi("revenue", fmt$(d.totalRevenue), computeRange(_rangePreset).label);
     _totalRevenue = d.totalRevenue;
+    // Same calendar dates re-bucketed on the Google Ads timezone, so TACOS
+    // divides spend and revenue over the same instants instead of windows 3h apart.
+    _adWindowRevenue = d.adWindow?.revenue ?? null;
     computeTacos();
     setKpi("aov", fmt$cents(d.aovOverall));
     setKpi("shipping", fmt$(d.totalShipping));
@@ -1215,10 +1220,15 @@ async function loadAbandoned() {
 // Stores totalSpend for TACOS calculation (shared with orders total revenue)
 let _adSpend = null;
 let _totalRevenue = null;
+let _adWindowRevenue = null;
 
 function computeTacos() {
-  if (_adSpend != null && _totalRevenue != null && _totalRevenue > 0) {
-    const tacos = (_adSpend / _totalRevenue) * 100;
+  // Ad spend is bucketed on the Google Ads (Pacific) calendar, so prefer the
+  // Pacific-bucketed revenue for a true ratio. Falls back to store-time revenue
+  // if the backend did not supply it.
+  const revenue = _adWindowRevenue ?? _totalRevenue;
+  if (_adSpend != null && revenue != null && revenue > 0) {
+    const tacos = (_adSpend / revenue) * 100;
     setKpi("tacos", fmtPct(tacos), "Ad spend / total revenue");
     if (_prevAdSpend != null && _prevTotalRevenue != null && _prevTotalRevenue > 0) {
       setDelta("tacos", tacos, (_prevAdSpend / _prevTotalRevenue) * 100, false);
@@ -1245,6 +1255,45 @@ async function loadGoogleAds() {
 
     _adSpend = d.totalSpend;
     computeTacos();
+
+    // Timezone disclosure. Google Ads buckets by its ACCOUNT timezone (Pacific,
+    // immutable); the store buckets by shop time (Eastern). Same calendar dates,
+    // instants 3h apart, so an order placed 9pm to midnight ET lands in Google's
+    // PREVIOUS day. Harmless across 7d+, but on a 1-day view it can move a whole
+    // order and read as a missing conversion. Say so rather than let it confuse.
+    const tzNote = document.getElementById("ads-tz-note");
+    if (tzNote) {
+      const TZ_LABEL = {
+        "America/Los_Angeles": "Pacific", "America/Denver": "Mountain",
+        "America/Chicago": "Central", "America/New_York": "Eastern",
+      };
+      const adsTz = d.timeZone
+        ? (TZ_LABEL[d.timeZone] || d.timeZone.split("/").pop().replace(/_/g, " "))
+        : "";
+      const shortRange = _rangePreset === "today" || _rangePreset === "yesterday";
+      if (adsTz) {
+        tzNote.innerHTML =
+          `Ad days are counted in the Google Ads account timezone (<strong>${adsTz}</strong>); store days are Eastern. ` +
+          `Google also credits a sale to the <strong>click</strong> date, not the order date, and keeps backfilling recent days.` +
+          (shortRange
+            ? ` <strong style="color:var(--orange);">On a single-day view these two effects can shift a whole order. Compare 7 days or more.</strong>`
+            : "");
+        tzNote.style.display = "";
+      } else {
+        tzNote.style.display = "none";
+      }
+    }
+
+    // De-duplication safety net failed, so totals may be inflated. Never silent.
+    const convWarn = document.getElementById("ads-conv-warn");
+    if (convWarn) {
+      if (d.conversionActionWarning) {
+        convWarn.textContent = "⚠️ " + d.conversionActionWarning;
+        convWarn.style.display = "";
+      } else {
+        convWarn.style.display = "none";
+      }
+    }
 
     setKpi("adspend", fmt$cents(d.totalSpend), `${fmtN(d.totalClicks)} clicks · CPC ${fmt$cents(d.cpc)}`);
 
@@ -1375,6 +1424,7 @@ async function loadAll() {
   // Reset shared state for TACOS calculation
   _adSpend = null;
   _totalRevenue = null;
+  _adWindowRevenue = null;
 
   // Load live data in parallel
   await Promise.allSettled([

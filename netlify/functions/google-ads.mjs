@@ -25,9 +25,15 @@ import { verifyToken } from "./_auth-verify.mjs";
 import { parseRange } from "./_range.mjs";
 
 const GOOGLE_ADS_API_VERSION = "v21";
-// The account sums 2 Primary "Purchase" conversion actions (Shopify + GA4), ~1.8x
-// inflating conversion value. Use ONLY this one so ACOS/ROAS are real. Override in
-// Netlify via GOOGLE_ADS_PRIMARY_CONVERSION_ACTION if you keep a different action.
+// Only ONE conversion action may feed ACOS/ROAS. The account historically ran two
+// Primary PURCHASE actions (Shopify + GA4) which double-counted every order ~1.8x.
+// As of 2026-07-30 the GA4 action is hidden/excluded, so this filter is a safety
+// net rather than an active correction — keep it, and never re-promote a second
+// PURCHASE action to Primary.
+//
+// Match on ID first: names are editable in the Google Ads UI, and a rename used to
+// make this filter silently fall through to the un-deduped totals with no warning.
+const PRIMARY_CONVERSION_ACTION_ID = process.env.GOOGLE_ADS_PRIMARY_CONVERSION_ACTION_ID || "7549839569";
 const PRIMARY_CONVERSION_ACTION = process.env.GOOGLE_ADS_PRIMARY_CONVERSION_ACTION || "Google Shopping App Purchase";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 
@@ -181,24 +187,38 @@ async function computeAdMetrics(accessToken, devToken, customerId, loginCustomer
   // primary one, so ACOS + ROAS reflect real (non-double-counted) ad revenue.
   try {
     const convRows = await queryGoogleAds(accessToken, devToken, customerId, loginCustomerId,
-      `SELECT segments.conversion_action_name, metrics.conversions, metrics.conversions_value
+      `SELECT segments.conversion_action, segments.conversion_action_name,
+              metrics.conversions, metrics.conversions_value
        FROM campaign WHERE ${dateFilter}`);
     let keptVal = 0, keptConv = 0;
+    let matched = false;
     const seen = new Set();
     for (const r of convRows) {
       const name = r.segments?.conversionActionName || "";
+      // segments.conversionAction is a resource name: customers/X/conversionActions/<id>
+      const id = String(r.segments?.conversionAction || "").split("/").pop();
       seen.add(name);
-      if (name === PRIMARY_CONVERSION_ACTION) {
+      if (id === PRIMARY_CONVERSION_ACTION_ID || (!id && name === PRIMARY_CONVERSION_ACTION)) {
+        matched = true;
         keptVal += Number(r.metrics?.conversionsValue || 0);
         keptConv += Number(r.metrics?.conversions || 0);
       }
     }
-    if (seen.has(PRIMARY_CONVERSION_ACTION)) {
+    if (matched) {
       result.totalConversionsValue = Math.round(keptVal * 100) / 100;
       result.totalConversions = Math.round(keptConv * 100) / 100;
       result.acos = keptVal > 0 ? Math.round((result.totalSpend / keptVal) * 10000) / 100 : null;
+    } else if (convRows.length > 0) {
+      // Rows came back but none matched the expected action — the action was
+      // renamed, deleted, or its ID changed. Totals below are UN-deduped and may
+      // be inflated. Surface it loudly instead of failing silently.
+      result.conversionActionWarning =
+        `Expected conversion action (id ${PRIMARY_CONVERSION_ACTION_ID} / "${PRIMARY_CONVERSION_ACTION}") not found. ` +
+        `ROAS/ACOS below are NOT de-duplicated. Seen: ${Array.from(seen).join(", ") || "none"}.`;
     }
+    result.conversionActionMatched = matched;
     result.conversionAction = PRIMARY_CONVERSION_ACTION;
+    result.conversionActionId = PRIMARY_CONVERSION_ACTION_ID;
     result.conversionActionsSeen = Array.from(seen);
   } catch (e) {
     result.conversionActionError = e.message;
@@ -255,6 +275,17 @@ export default async function handler(req) {
     const result = await computeAdMetrics(accessToken, devToken, customerId, loginCustomerId, range.start, range.end);
     result.range = { start: range.start, end: range.end };
     result.windowDays = range.days;
+
+    // segments.date is bucketed in the ACCOUNT timezone, which is fixed at account
+    // creation and cannot be changed. Report it so the UI can say which calendar
+    // these numbers are on rather than letting it be silently assumed.
+    try {
+      const tzRows = await queryGoogleAds(accessToken, devToken, customerId, loginCustomerId,
+        "SELECT customer.time_zone FROM customer");
+      result.timeZone = tzRows[0]?.customer?.timeZone || null;
+    } catch {
+      result.timeZone = null;
+    }
 
     if (range.prev) {
       const p = await computeAdMetrics(accessToken, devToken, customerId, loginCustomerId, range.prev.start, range.prev.end);
